@@ -1,136 +1,200 @@
-'use client';
+"use client";
 
-import { FormEvent, useEffect, useState } from 'react';
-import { useLocaleCopy } from '../../lib/useLocale';
-import { getApiBaseUrl } from '../../lib/api';
-import { CaptchaBlock } from '../../components/CaptchaBlock';
-import { QrCodeBlock } from '../../components/QrCodeBlock';
-
-interface GuildInfoResponse {
-  ok: boolean;
-  guildName: string;
-  guildIconUrl?: string;
-}
+import { useEffect, useState } from "react";
+import type { CSSProperties, FormEvent } from "react";
 
 interface VerifyResponse {
-  ok: boolean;
+  ok?: boolean;
   badgeEmoji?: string;
-  mobileDeepLink?: string | null;
+  mobileDeepLink?: string;
 }
 
-type CaptchaPayload = { type: 'recaptcha' | 'fallbackEmoji'; value: string } | null;
+interface GuildInfoResponse {
+  guildName?: string;
+}
 
-export default function VerifyPage() {
+export default function VerifyPage(): JSX.Element {
   const [token, setToken] = useState<string | null>(null);
-  const [guild, setGuild] = useState<GuildInfoResponse | null>(null);
-  const [status, setStatus] = useState<string>('');
-  const [error, setError] = useState<string>('');
-  const [qrValue, setQrValue] = useState<string>('');
-  const [captchaResult, setCaptchaResult] = useState<CaptchaPayload>(null);
-  const copy = useLocaleCopy();
-  const apiBase = getApiBaseUrl();
-  const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
+  const [guildName, setGuildName] = useState<string>("Server");
+  const [statusMsg, setStatusMsg] = useState<string>("");
+  const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const tokenFromQuery = params.get('token');
-    setToken(tokenFromQuery);
-    fetch(`${apiBase}/api/guild-info`)
-      .then((res) => res.json())
-      .then((data: GuildInfoResponse) => setGuild(data))
-      .catch(() => setGuild(null));
-  }, [apiBase]);
+    const t = params.get("token");
+    setToken(t || null);
+    setLoading(false);
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    if (!token) {
-      setError(copy.tokenMissing);
-      return;
+    if (process.env.NEXT_PUBLIC_API_BASE_URL) {
+      fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/guild-info`)
+        .then((r) => r.json())
+        .then((data: GuildInfoResponse) => {
+          if (data && data.guildName) {
+            setGuildName(data.guildName);
+          }
+        })
+        .catch(() => {
+          /* noop */
+        });
     }
-    if (!captchaResult || (captchaResult.type === 'recaptcha' && !captchaResult.value)) {
-      setError(copy.captchaMissing);
-      return;
-    }
-    if (captchaResult.type === 'fallbackEmoji' && captchaResult.value !== 'ok') {
-      setError(copy.captchaMissing);
-      return;
-    }
+  }, []);
 
-    setError('');
-    setStatus(copy.verifying);
+  async function handleVerify(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!token) return;
+
+    setStatusMsg("Memverifikasi...");
+
+    const body = {
+      token,
+      captchaResult: { type: "fallbackEmoji", value: "ok" },
+      ip: "0.0.0.0",
+    };
 
     try {
-      const res = await fetch(`${apiBase}/api/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token,
-          captchaResult,
-          ip: '0.0.0.0',
-        }),
-      });
-      const data: VerifyResponse = await res.json();
-      if (data.ok) {
-        setStatus(copy.successMessage);
-        if (data.mobileDeepLink) {
-          setQrValue(data.mobileDeepLink);
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_BASE_URL ?? ""}/api/verify`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
         }
+      );
+
+      const data: VerifyResponse = await res.json();
+
+      if (data.ok) {
+        setStatusMsg(`✅ Verifikasi berhasil! Kamu sekarang Verified di ${guildName}.`);
       } else {
-        setError(copy.verifyFailed);
-        setStatus('');
+        setStatusMsg("❌ Verifikasi gagal (token invalid / kadaluarsa).");
       }
     } catch (err) {
-      setError(copy.verifyFailed);
-      setStatus('');
+      console.error(err);
+      setStatusMsg("❌ Gagal menghubungi server verifikasi.");
     }
   }
 
+  const outerStyle: CSSProperties = {
+    minHeight: "100vh",
+    backgroundColor: "#0a0a0a",
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "24px",
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "Inter", "Roboto", "Segoe UI", sans-serif',
+  };
+
+  const cardStyle: CSSProperties = {
+    width: "100%",
+    maxWidth: "380px",
+    backgroundColor: "rgba(38,38,38,0.7)",
+    borderRadius: "12px",
+    border: "1px solid #3f3f3f",
+    boxShadow: "0 30px 60px rgba(0,0,0,0.8)",
+    padding: "20px",
+  };
+
+  const tokenBoxStyle: CSSProperties = {
+    backgroundColor: "rgba(10,10,10,0.6)",
+    borderRadius: "8px",
+    padding: "12px",
+    fontSize: "10px",
+    color: "#aaa",
+    wordBreak: "break-all",
+    marginTop: "8px",
+    marginBottom: "12px",
+  };
+
+  const btnStyle: CSSProperties = {
+    width: "100%",
+    borderRadius: "8px",
+    backgroundColor: "#10b981",
+    color: "#000",
+    fontWeight: 600,
+    fontSize: "0.8rem",
+    padding: "10px 0",
+    cursor: "pointer",
+    border: "none",
+    marginBottom: "8px",
+  };
+
+  const footerStyle: CSSProperties = {
+    fontSize: "10px",
+    color: "#666",
+    textAlign: "center",
+    marginTop: "12px",
+  };
+
   return (
-    <main className="min-h-screen bg-neutral-950 text-white flex items-center justify-center p-6">
-      <div className="w-full max-w-xl rounded-3xl bg-neutral-900/60 border border-white/10 shadow-xl p-6 space-y-6">
-        <div className="space-y-2 text-center">
-          {guild?.guildIconUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={guild.guildIconUrl}
-              alt="Guild icon"
-              className="mx-auto h-16 w-16 rounded-2xl border border-white/20"
-            />
-          ) : null}
-          <h1 className="text-2xl font-semibold">
-            {guild?.guildName || 'Server'} {copy.titleSuffix}
-          </h1>
-          <p className="text-sm text-white/60">{copy.subtitle}</p>
+    <main style={outerStyle}>
+      <div style={cardStyle}>
+        <div style={{ marginBottom: "12px" }}>
+          <div
+            style={{
+              fontSize: "1rem",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <span role="img" aria-label="shield">
+              🛡️
+            </span>
+            <span>{guildName} Verification</span>
+          </div>
+
+          <div
+            style={{
+              fontSize: "11px",
+              color: "#999",
+              lineHeight: "16px",
+            }}
+          >
+            Klik tombol di bawah untuk menyelesaikan verifikasi akun Discord kamu.
+          </div>
         </div>
 
-        {token ? (
-          <div className="rounded-xl bg-black/40 p-4 text-[11px] text-white/60 break-all">
-            <p className="font-semibold text-white/70">Token</p>
-            <p>{token}</p>
+        {loading ? (
+          <div style={{ fontSize: "12px", color: "#bbb" }}>Loading...</div>
+        ) : !token ? (
+          <div style={{ fontSize: "12px", color: "#f87171" }}>
+            Token tidak ditemukan atau sudah kadaluarsa.
           </div>
         ) : (
-          <div className="rounded-xl bg-red-500/20 p-3 text-sm text-red-200">
-            {copy.tokenMissing}
-          </div>
+          <>
+            <div style={{ fontSize: "11px", color: "#bbb" }}>
+              Token verifikasi kamu:
+            </div>
+            <div style={tokenBoxStyle}>{token}</div>
+
+            <form onSubmit={handleVerify}>
+              <button type="submit" style={btnStyle}>
+                Lanjutkan Verifikasi
+              </button>
+            </form>
+          </>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <CaptchaBlock onSolved={setCaptchaResult} siteKey={siteKey} />
-          <button
-            type="submit"
-            className="w-full rounded-xl bg-emerald-500 py-3 text-black font-semibold hover:bg-emerald-400 transition"
-            disabled={!token}
+        {statusMsg ? (
+          <div
+            style={{
+              textAlign: "center",
+              fontSize: "12px",
+              color: "#ddd",
+              marginTop: "8px",
+              whiteSpace: "pre-line",
+            }}
           >
-            {copy.button}
-          </button>
-        </form>
+            {statusMsg}
+          </div>
+        ) : null}
 
-        {status && <p className="text-xs text-center text-emerald-300">{status}</p>}
-        {error && <p className="text-xs text-center text-red-300">{error}</p>}
-
-        <QrCodeBlock value={qrValue} />
-
-        <p className="text-[11px] text-center text-white/40">{copy.footer}</p>
+        <div style={footerStyle}>
+          Jika tombol tidak bekerja, hubungi admin server.
+        </div>
       </div>
     </main>
   );

@@ -1,7 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
   experimental: {
-    serverActions: false,
+    appDir: true,
   },
   images: {
     remotePatterns: [
