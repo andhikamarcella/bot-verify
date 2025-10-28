@@ -1,30 +1,31 @@
 const express = require('express');
-const { getMetrics, listIpHashes } = require('../models/Token');
-const { listProfiles } = require('../models/UserProfile');
+const { aggregateTotals, aggregateDaily, aggregateIpHashes } = require('../models/VerificationLog');
 
 const router = express.Router();
 
-function ensureAdmin(req, res) {
-  const expected = process.env.ADMIN_KEY;
-  const auth = req.headers.authorization || '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-  if (!expected || token !== expected) {
-    res.status(403).json({ ok: false, error: 'forbidden' });
-    return false;
-  }
-  return true;
-}
-
 router.get('/dashboard/metrics', async (req, res) => {
-  if (!ensureAdmin(req, res)) return;
+  const auth = req.header('authorization') || '';
+  const expected = process.env.ADMIN_KEY ? `Bearer ${process.env.ADMIN_KEY}` : '';
+  if (!process.env.ADMIN_KEY || auth !== expected) {
+    return res.status(403).json({ ok: false, error: 'unauthorized' });
+  }
+
   try {
-    const metrics = await getMetrics();
-    const ipHashes = await listIpHashes();
-    const profiles = await listProfiles(200);
-    res.json({ ok: true, metrics, ipHashes, profiles });
+    const totals = await aggregateTotals();
+    const graphData = await aggregateDaily();
+    const ipHashLogs = await aggregateIpHashes();
+
+    res.json({
+      ok: true,
+      totalVerified: totals.VERIFIED || 0,
+      totalFailed: totals.FAILED || 0,
+      totalBanned: totals.BANNED || 0,
+      graphData,
+      ipHashLogs,
+    });
   } catch (error) {
-    console.error('Failed to compute metrics', error);
-    res.status(500).json({ ok: false, error: 'internal-error' });
+    console.error('dashboard metrics error', error);
+    res.status(500).json({ ok: false, error: 'metrics-failed' });
   }
 });
 

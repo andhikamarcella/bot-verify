@@ -1,210 +1,179 @@
 const express = require('express');
 const crypto = require('crypto');
-const { Routes } = require('discord.js');
 const client = require('../../bot/discordClient');
-const {
-  createTokenDocument,
-  findToken,
-  updateToken,
-  markVerified,
-  incrementFailure,
-  getLeaderboard,
-} = require('../models/Token');
-const { upsertUserProfile } = require('../models/UserProfile');
-const { verifyRecaptcha } = require('../lib/recaptcha');
+const { createTokenDocument, findToken, setTokenStatus } = require('../models/Tokens');
+const { upsertUserProfile } = require('../models/Users');
+const { insertLog } = require('../models/VerificationLog');
 const { hashIp } = require('../lib/hashIp');
-const { registerRecentVerification } = require('../../bot/bot');
+const { verifyRecaptcha } = require('../lib/recaptcha');
+const { getExtraRolesForUser } = require('../lib/roleSync');
+const { connectMongo } = require('../lib/db');
 
 const router = express.Router();
 
-function buildVerificationUrl(token) {
-  const base = (process.env.PUBLIC_FRONTEND_URL || '').replace(/\/$/, '');
-  return `${base}/verify?token=${token}`;
-}
+const GUILD_ID = process.env.GUILD_ID;
+const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;
+const WELCOME_CHANNEL_ID = process.env.WELCOME_CHANNEL_ID;
+const FRONTEND_URL = process.env.PUBLIC_FRONTEND_URL || '';
+const DISCORD_BROWSER_URL = process.env.DISCORD_BROWSER_URL || null;
 
-async function fetchProfile(userId) {
-  try {
-    const data = await client.rest.get(Routes.user(userId));
-    return data;
-  } catch (error) {
-    console.warn('Failed to fetch user profile from Discord REST', error?.message);
-    return null;
+async function ensureReady() {
+  await connectMongo();
+  if (!client.isReady()) {
+    await new Promise((resolve) => client.once('ready', resolve));
   }
 }
 
 router.post('/create-token', async (req, res) => {
   try {
-    const { userId, username, locale, trustedSource } = req.body;
-    if (!userId || !username) {
-      res.status(400).json({ ok: false, error: 'missing-user' });
-      return;
+    const { userId } = req.body || {};
+    if (!userId) {
+      return res.status(400).json({ ok: false, error: 'missing-userId' });
     }
+
+    await ensureReady();
+
+    const extraRoles = await getExtraRolesForUser(client, userId);
     const token = crypto.randomUUID();
     await createTokenDocument({
       token,
       userId,
-      username,
-      locale,
-      guildId: process.env.GUILD_ID,
-      trustedSource,
+      guildId: GUILD_ID,
+      roleId: MEMBER_ROLE_ID,
+      status: 'PENDING',
+      extraRolesEligible: extraRoles,
+      createdAt: new Date(),
     });
-    res.json({ ok: true, token, verificationUrl: buildVerificationUrl(token) });
+
+    const verificationUrl = `${FRONTEND_URL.replace(/\/$/, '')}/verify?token=${token}`;
+    res.json({ ok: true, token, verificationUrl });
   } catch (error) {
-    console.error('Failed to create token via API', error);
-    res.status(500).json({ ok: false, error: 'internal-error' });
+    console.error('create-token error', error);
+    res.status(500).json({ ok: false, error: 'create-token-failed' });
   }
 });
-
-router.get('/verify/info', async (req, res) => {
-  const token = req.query.token;
-  if (!token) {
-    res.status(400).json({ ok: false, error: 'missing-token' });
-    return;
-  }
-  const tokenDoc = await findToken(token);
-  if (!tokenDoc) {
-    res.status(404).json({ ok: false, error: 'token-not-found' });
-    return;
-  }
-  res.json({
-    ok: true,
-    discordUserId: tokenDoc.userId,
-    username: tokenDoc.username,
-    status: tokenDoc.status,
-    verifiedAt: tokenDoc.verifiedAt,
-    failureReason: tokenDoc.failureReason,
-  });
-});
-
-router.get('/guild-info', async (_req, res) => {
-  try {
-    const guild = await client.guilds.fetch(process.env.GUILD_ID);
-    res.json({
-      ok: true,
-      name: guild.name,
-      icon: guild.iconURL({ size: 256 }),
-      memberCount: guild.memberCount,
-      browserUrl: process.env.DISCORD_BROWSER_URL || null,
-    });
-  } catch (error) {
-    console.error('Failed to load guild info', error);
-    res.status(500).json({ ok: false, error: 'guild-unavailable' });
-  }
-});
-
-router.get('/leaderboard', async (_req, res) => {
-  try {
-    const leaderboard = await getLeaderboard();
-    res.json({ ok: true, leaderboard });
-  } catch (error) {
-    console.error('Failed to load leaderboard', error);
-    res.status(500).json({ ok: false, error: 'internal-error' });
-  }
-});
-
-async function assignMemberRole(userId) {
-  const guildId = process.env.GUILD_ID;
-  const roleId = process.env.MEMBER_ROLE_ID;
-  if (!guildId || !roleId) throw new Error('Missing guild or role configuration');
-  const guild = await client.guilds.fetch(guildId);
-  const member = await guild.members.fetch(userId);
-  if (!member.roles.cache.has(roleId)) {
-    await member.roles.add(roleId, 'Verification success');
-  }
-  return member;
-}
-
-async function sendWelcome(userId) {
-  const channelId = process.env.WELCOME_CHANNEL_ID;
-  if (!channelId) return;
-  try {
-    const channel = await client.channels.fetch(channelId);
-    await channel.send({ content: `Welcome <@${userId}> 🎉 kamu sekarang sudah jadi Member!` });
-  } catch (error) {
-    console.error('Failed to deliver welcome message', error);
-  }
-}
 
 router.post('/verify', async (req, res) => {
-  const { token, captchaResult, fallbackSolution } = req.body || {};
-  if (!token) {
-    res.status(400).json({ ok: false, error: 'missing-token' });
-    return;
-  }
-  const tokenDoc = await findToken(token);
-  if (!tokenDoc) {
-    res.status(404).json({ ok: false, error: 'token-not-found' });
-    return;
-  }
-
-  if (tokenDoc.status === 'verified' || tokenDoc.status === 'trusted') {
-    res.status(200).json({ ok: true, alreadyVerified: true });
-    return;
-  }
-
-  if (tokenDoc.status === 'banned') {
-    res.status(403).json({ ok: false, error: 'account-flagged' });
-    return;
-  }
-
-  const requesterIp = req.ip || req.headers['x-forwarded-for'];
-  const ipHash = hashIp(Array.isArray(requesterIp) ? requesterIp[0] : requesterIp);
-
-  let captchaOk = false;
-  if (captchaResult) {
-    const captcha = await verifyRecaptcha(captchaResult, req.ip);
-    captchaOk = captcha.success;
-    if (!captcha.success) {
-      await incrementFailure(token, captcha.reason, ipHash);
-      res.status(400).json({ ok: false, error: captcha.reason });
-      return;
-    }
-  } else if (fallbackSolution) {
-    if (fallbackSolution === 'passed') {
-      captchaOk = true;
-    } else {
-      await incrementFailure(token, 'fallback-captcha-failed', ipHash);
-      res.status(400).json({ ok: false, error: 'fallback-captcha-failed' });
-      return;
-    }
-  } else {
-    await incrementFailure(token, 'missing-captcha', ipHash);
-    res.status(400).json({ ok: false, error: 'missing-captcha' });
-    return;
-  }
-
-  if (!captchaOk) {
-    await incrementFailure(token, 'captcha-not-verified', ipHash);
-    res.status(400).json({ ok: false, error: 'captcha-not-verified' });
-    return;
-  }
-
   try {
-    const member = await assignMemberRole(tokenDoc.userId);
-    await markVerified(token, { ipHash, status: 'verified' });
-    await sendWelcome(tokenDoc.userId);
-    registerRecentVerification(tokenDoc.userId);
-
-    const profile = await fetchProfile(tokenDoc.userId);
-    if (profile) {
-      await upsertUserProfile({
-        userId: tokenDoc.userId,
-        username: profile.username,
-        globalName: profile.global_name,
-        avatar: profile.avatar,
-        bannerUrl: profile.banner,
-        accentColor: profile.accent_color,
-        badgeEmoji: '🛡️',
-        badgeName: 'Verified Member',
-        suspicious: false,
-      });
+    const { token, captchaResult, ip: bodyIp } = req.body || {};
+    if (!token) {
+      return res.status(400).json({ ok: false, error: 'missing-token' });
     }
 
-    res.json({ ok: true });
+    await ensureReady();
+
+    const record = await findToken(token);
+    if (!record || record.status !== 'PENDING') {
+      return res.status(400).json({ ok: false, error: 'invalid-token' });
+    }
+
+    const createdAt = record.createdAt ? new Date(record.createdAt) : new Date();
+    if (Date.now() - createdAt.getTime() > 15 * 60 * 1000) {
+      await setTokenStatus(token, 'FAILED', { failureReason: 'expired' });
+      await insertLog({
+        userId: record.userId,
+        guildId: record.guildId,
+        ipHash: hashIp(bodyIp || req.ip),
+        result: 'FAILED',
+        reason: 'expired',
+      });
+      return res.status(400).json({ ok: false, error: 'token-expired' });
+    }
+
+    let captchaOk = false;
+    if (captchaResult?.type === 'recaptcha') {
+      captchaOk = await verifyRecaptcha(captchaResult.value, process.env.RECAPTCHA_SECRET_KEY);
+    } else if (captchaResult?.type === 'fallbackEmoji') {
+      captchaOk = captchaResult.value === 'ok';
+    }
+
+    if (!captchaOk) {
+      await setTokenStatus(token, 'FAILED', { failureReason: 'captcha' });
+      await insertLog({
+        userId: record.userId,
+        guildId: record.guildId,
+        ipHash: hashIp(bodyIp || req.ip),
+        result: 'FAILED',
+        reason: 'captcha-invalid',
+      });
+      return res.status(400).json({ ok: false, error: 'captcha-invalid' });
+    }
+
+    const guild = await client.guilds.fetch(GUILD_ID);
+    const member = await guild.members.fetch(record.userId);
+
+    const rolesToApply = new Set();
+    if (MEMBER_ROLE_ID) {
+      rolesToApply.add(MEMBER_ROLE_ID);
+    }
+    for (const roleId of record.extraRolesEligible || []) {
+      if (roleId) {
+        rolesToApply.add(roleId);
+      }
+    }
+
+    for (const roleId of rolesToApply) {
+      if (!member.roles.cache.has(roleId)) {
+        try {
+          await member.roles.add(roleId, 'Verification success');
+        } catch (roleError) {
+          console.error('Failed to assign role', roleId, roleError);
+        }
+      }
+    }
+
+    if (WELCOME_CHANNEL_ID) {
+      try {
+        const channel = await guild.channels.fetch(WELCOME_CHANNEL_ID);
+        await channel.send({
+          content: `Welcome <@${record.userId}> 🎉 kamu sekarang sudah jadi Member!`,
+        });
+      } catch (welcomeError) {
+        console.error('Failed to send welcome message', welcomeError);
+      }
+    }
+
+    const user = await client.users.fetch(record.userId);
+    const now = new Date();
+    await setTokenStatus(token, 'VERIFIED', { verifiedAt: now });
+    await insertLog({
+      userId: record.userId,
+      guildId: record.guildId,
+      ipHash: hashIp(bodyIp || req.ip),
+      result: 'VERIFIED',
+    });
+    await upsertUserProfile({
+      userId: record.userId,
+      guildId: record.guildId,
+      badgeEmoji: '🛡️',
+      badgeName: 'Verified Member',
+      suspicious: false,
+      avatarUrl: user.displayAvatarURL({ size: 256, extension: 'png' }),
+      bannerUrl: user.bannerURL({ size: 512, extension: 'png' }) || null,
+      accentColor: user.accentColor ?? null,
+      usernameSnapshot: user.username,
+      globalNameSnapshot: user.globalName || null,
+      verifiedAt: now,
+    });
+
+    try {
+      const { registerRecentVerification } = require('../../bot/bot');
+      if (typeof registerRecentVerification === 'function') {
+        registerRecentVerification(record.userId);
+      }
+    } catch (regErr) {
+      console.warn('Failed to flag recent verification', regErr?.message);
+    }
+
+    res.json({
+      ok: true,
+      badgeEmoji: '🛡️',
+      userId: record.userId,
+      mobileDeepLink: DISCORD_BROWSER_URL,
+    });
   } catch (error) {
-    console.error('Failed to complete verification', error);
-    await updateToken(token, { status: 'failed', failureReason: error.message });
-    res.status(500).json({ ok: false, error: 'discord-error' });
+    console.error('verify error', error);
+    res.status(500).json({ ok: false, error: 'verification-failed' });
   }
 });
 

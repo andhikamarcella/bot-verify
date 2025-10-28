@@ -1,11 +1,9 @@
-// Discord bot bootstrapper: loads commands, listens for interactions, and
-// exposes helpers for the API to flag recently verified users.
 const path = require('path');
 const fs = require('fs');
 const client = require('./discordClient');
-const { analyzeMessage } = require('./utils/behaviorCheck');
-const { upsertUserProfile } = require('../api/models/UserProfile');
-const { findLatestByUser, updateToken } = require('../api/models/Token');
+const { analyzeFirstMessageBehavior } = require('./utils/behaviorCheck');
+const { markUserSuspicious } = require('../api/models/Users');
+const { insertLog } = require('../api/models/VerificationLog');
 
 const GUILD_ID = process.env.GUILD_ID;
 const WELCOME_CHANNEL_ID = process.env.WELCOME_CHANNEL_ID;
@@ -18,8 +16,8 @@ function registerRecentVerification(userId) {
 
 function pruneRecent() {
   const now = Date.now();
-  for (const [userId, timestamp] of recentlyVerified.entries()) {
-    if (now - timestamp > 1000 * 60 * 30) {
+  for (const [userId, ts] of recentlyVerified.entries()) {
+    if (now - ts > 15 * 60 * 1000) {
       recentlyVerified.delete(userId);
     }
   }
@@ -37,7 +35,7 @@ async function loadCommands() {
 }
 
 client.once('ready', () => {
-  console.log(`🤖 Bot logged in as ${client.user.tag}`);
+  console.log(`Bot masuk sebagai ${client.user.tag}`);
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -45,14 +43,11 @@ client.on('interactionCreate', async (interaction) => {
   const command = client.commands.get(interaction.commandName);
   if (!command) return;
   try {
-    await command.execute(interaction);
+    await command.execute(interaction, client);
   } catch (error) {
     console.error('Command execution failed', error);
-    if (!interaction.replied) {
-      await interaction.reply({
-        content: 'Terjadi kesalahan saat menjalankan perintah.',
-        flags: 64,
-      });
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: 'Terjadi kesalahan.', flags: 64 });
     }
   }
 });
@@ -63,34 +58,29 @@ client.on('messageCreate', async (message) => {
   pruneRecent();
   if (!recentlyVerified.has(message.author.id)) return;
 
-  const analysis = analyzeMessage(message.content);
+  const analysis = analyzeFirstMessageBehavior(message.content);
   if (!analysis.suspicious) {
     recentlyVerified.delete(message.author.id);
     return;
   }
 
   recentlyVerified.delete(message.author.id);
-  console.warn('Suspicious message detected from', message.author.id, analysis.reasons);
-
-  await upsertUserProfile({
+  await markUserSuspicious(message.author.id, GUILD_ID, analysis.reason);
+  await insertLog({
     userId: message.author.id,
-    suspicious: true,
-    suspiciousReasons: analysis.reasons,
+    guildId: GUILD_ID,
+    result: 'BANNED',
+    reason: analysis.reason,
   });
-
-  const tokenDoc = await findLatestByUser(message.author.id);
-  if (tokenDoc) {
-    await updateToken(tokenDoc.token, { status: 'banned', failureReason: analysis.reasons.join(',') });
-  }
 
   if (WELCOME_CHANNEL_ID) {
     try {
       const channel = await client.channels.fetch(WELCOME_CHANNEL_ID);
       await channel.send({
-        content: `⚠️ **Alert**: Pesan pertama <@${message.author.id}> terdeteksi mencurigakan (${analysis.reasons.join(', ')}).`,
+        content: `⚠️ Pesan pertama <@${message.author.id}> terdeteksi mencurigakan (${analysis.reason}).`,
       });
-    } catch (error) {
-      console.error('Failed to send suspicious alert', error);
+    } catch (err) {
+      console.error('Failed to send suspicious alert', err);
     }
   }
 });

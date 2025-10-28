@@ -1,215 +1,137 @@
 'use client';
-// @ts-nocheck
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import Card from '../../components/Card';
-import Button from '../../components/Button';
-import Layout from '../../components/Layout';
-import { useLocaleCopy } from '../../lib/useLocale';
-import { apiFetch } from '../../lib/api';
 
-const SITE_KEY = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || process.env.RECAPTCHA_SITE_KEY;
-function useGuildInfo() {
-  const [guild, setGuild] = useState(null);
-  useEffect(() => {
-    apiFetch('/api/guild-info')
-      .then((res) => setGuild(res))
-      .catch(() => setGuild(null));
-  }, []);
-  return guild;
+import { FormEvent, useEffect, useState } from 'react';
+import { useLocaleCopy } from '../../lib/useLocale';
+import { getApiBaseUrl } from '../../lib/api';
+import { CaptchaBlock } from '../../components/CaptchaBlock';
+import { QrCodeBlock } from '../../components/QrCodeBlock';
+
+interface GuildInfoResponse {
+  ok: boolean;
+  guildName: string;
+  guildIconUrl?: string;
 }
 
+interface VerifyResponse {
+  ok: boolean;
+  badgeEmoji?: string;
+  mobileDeepLink?: string | null;
+}
+
+type CaptchaPayload = { type: 'recaptcha' | 'fallbackEmoji'; value: string } | null;
+
 export default function VerifyPage() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const token = searchParams.get('token');
+  const [token, setToken] = useState<string | null>(null);
+  const [guild, setGuild] = useState<GuildInfoResponse | null>(null);
+  const [status, setStatus] = useState<string>('');
+  const [error, setError] = useState<string>('');
+  const [qrValue, setQrValue] = useState<string>('');
+  const [captchaResult, setCaptchaResult] = useState<CaptchaPayload>(null);
   const copy = useLocaleCopy();
-  const guildInfo = useGuildInfo();
-
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [info, setInfo] = useState(null);
-  const [captchaToken, setCaptchaToken] = useState('');
-  const [recaptchaReady, setRecaptchaReady] = useState(false);
-  const [recaptchaFailed, setRecaptchaFailed] = useState(false);
-  const [fallbackChoice, setFallbackChoice] = useState('');
-  const widgetIdRef = useRef(null);
+  const apiBase = getApiBaseUrl();
+  const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
 
   useEffect(() => {
-    if (!token) {
-      setError('Token tidak ditemukan di tautan.');
-      return;
-    }
-    apiFetch(`/api/verify/info?token=${token}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(res.error || 'invalid-token');
-        setInfo(res);
-        if (res.status === 'verified' || res.status === 'trusted') {
-          router.push('/verify/success');
-        }
-        if (res.status === 'banned') {
-          setError('Akun ini sedang diperiksa oleh tim keamanan.');
-        }
-      })
-      .catch(() => {
-        setError('Token tidak valid atau sudah kedaluwarsa.');
-      });
-  }, [token, router]);
+    const params = new URLSearchParams(window.location.search);
+    const tokenFromQuery = params.get('token');
+    setToken(tokenFromQuery);
+    fetch(`${apiBase}/api/guild-info`)
+      .then((res) => res.json())
+      .then((data: GuildInfoResponse) => setGuild(data))
+      .catch(() => setGuild(null));
+  }, [apiBase]);
 
-  useEffect(() => {
-    if (!SITE_KEY) {
-      setRecaptchaFailed(true);
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://www.google.com/recaptcha/api.js?render=explicit';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => setRecaptchaReady(true);
-    script.onerror = () => setRecaptchaFailed(true);
-    document.body.appendChild(script);
-    return () => {
-      document.body.removeChild(script);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!recaptchaReady || recaptchaFailed || !SITE_KEY) return;
-    if (typeof window === 'undefined') return;
-    if (!window.grecaptcha) return;
-    if (widgetIdRef.current !== null) return;
-    widgetIdRef.current = window.grecaptcha.render('recaptcha-widget', {
-      sitekey: SITE_KEY,
-      callback: (tokenValue) => setCaptchaToken(tokenValue),
-      'expired-callback': () => setCaptchaToken(''),
-    });
-  }, [recaptchaReady, recaptchaFailed]);
-
-  const fallbackEmojis = useMemo(() => ['🍉', '🍇', '🍓', '🍊', '🥝'], []);
-  const targetEmoji = useMemo(() => fallbackEmojis[Math.floor(Math.random() * fallbackEmojis.length)], [fallbackEmojis]);
-
-  const onSubmit = async (event) => {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    setError('');
     if (!token) {
-      setError('Token hilang.');
+      setError(copy.tokenMissing);
       return;
     }
-    if (!recaptchaFailed && !captchaToken) {
-      setError('Selesaikan captcha terlebih dahulu.');
+    if (!captchaResult || (captchaResult.type === 'recaptcha' && !captchaResult.value)) {
+      setError(copy.captchaMissing);
       return;
     }
-    if (recaptchaFailed && fallbackChoice !== 'passed') {
-      setError('Selesaikan captcha emoji.');
+    if (captchaResult.type === 'fallbackEmoji' && captchaResult.value !== 'ok') {
+      setError(copy.captchaMissing);
       return;
     }
 
-    setLoading(true);
+    setError('');
+    setStatus(copy.verifying);
+
     try {
-      const payload = {
-        token,
-        captchaResult: !recaptchaFailed ? captchaToken : undefined,
-        fallbackSolution: recaptchaFailed ? fallbackChoice : undefined,
-      };
-      const res = await apiFetch('/api/verify', {
+      const res = await fetch(`${apiBase}/api/verify`, {
         method: 'POST',
-        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token,
+          captchaResult,
+          ip: '0.0.0.0',
+        }),
       });
-      if (res.ok) {
-        router.push('/verify/success');
+      const data: VerifyResponse = await res.json();
+      if (data.ok) {
+        setStatus(copy.successMessage);
+        if (data.mobileDeepLink) {
+          setQrValue(data.mobileDeepLink);
+        }
       } else {
-        setError(res.error || 'Verifikasi gagal.');
+        setError(copy.verifyFailed);
+        setStatus('');
       }
     } catch (err) {
-      setError('Terjadi kesalahan saat memproses verifikasi.');
-    } finally {
-      setLoading(false);
-      if (typeof window !== 'undefined' && window.grecaptcha && widgetIdRef.current !== null) {
-        window.grecaptcha.reset(widgetIdRef.current);
-      }
+      setError(copy.verifyFailed);
+      setStatus('');
     }
-  };
-
-  const handleFallback = (emoji) => {
-    if (emoji === targetEmoji) {
-      setFallbackChoice('passed');
-    } else {
-      setFallbackChoice('failed');
-    }
-  };
+  }
 
   return (
-    <Layout
-      headline={copy.title}
-      description={guildInfo?.ok ? `${guildInfo.name} • ${copy.subtitle}` : copy.subtitle}
-    >
-      <Card className="space-y-6">
-        <div className="flex items-center gap-4">
-          {guildInfo?.icon && (
+    <main className="min-h-screen bg-neutral-950 text-white flex items-center justify-center p-6">
+      <div className="w-full max-w-xl rounded-3xl bg-neutral-900/60 border border-white/10 shadow-xl p-6 space-y-6">
+        <div className="space-y-2 text-center">
+          {guild?.guildIconUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={guildInfo.icon} alt="Guild logo" className="h-16 w-16 rounded-2xl border border-white/10" />
-          )}
-          <div>
-            <p className="text-xl font-semibold">
-              {info?.username ? `Hai ${info.username} 👋` : 'Memuat informasi token...'}
-            </p>
-            <p className="text-sm text-white/60">
-              Selesaikan langkah kecil ini biar kamu dapet badge Member 💫
-            </p>
-          </div>
+            <img
+              src={guild.guildIconUrl}
+              alt="Guild icon"
+              className="mx-auto h-16 w-16 rounded-2xl border border-white/20"
+            />
+          ) : null}
+          <h1 className="text-2xl font-semibold">
+            {guild?.guildName || 'Server'} {copy.titleSuffix}
+          </h1>
+          <p className="text-sm text-white/60">{copy.subtitle}</p>
         </div>
 
-        {error && <p className="rounded-xl bg-red-500/20 p-3 text-sm text-red-200">{error}</p>}
-
-        {info && ['pending', 'failed'].includes(info.status) && (
-          <form onSubmit={onSubmit} className="space-y-6">
-            {info.status === 'failed' && (
-              <p className="rounded-xl bg-yellow-500/20 p-3 text-sm text-yellow-200">
-                Percobaan sebelumnya gagal ({info.failureReason || 'unknown'}). Coba lagi ya!
-              </p>
-            )}
-            {!recaptchaFailed ? (
-              <div>
-                <p className="mb-3 text-sm text-white/70">{copy.captchaLabel}</p>
-                <div id="recaptcha-widget" className="g-recaptcha" data-sitekey={SITE_KEY}></div>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <p className="text-sm text-white/70">{copy.fallbackPrompt}</p>
-                <div className="flex flex-wrap gap-3">
-                  {fallbackEmojis.map((emoji) => (
-                    <button
-                      type="button"
-                      key={emoji}
-                      onClick={() => handleFallback(emoji)}
-                      className={`h-16 w-16 rounded-2xl border border-white/10 text-3xl transition hover:scale-105 ${
-                        fallbackChoice === 'passed' && emoji === targetEmoji ? 'ring-2 ring-cyberPink' : ''
-                      }`}
-                    >
-                      {emoji === targetEmoji ? <span className="animate-pulse">{emoji}</span> : emoji}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <Button type="submit" disabled={loading} className="w-full">
-              {loading ? 'Processing...' : copy.button}
-            </Button>
-          </form>
-        )}
-
-        {info && info.status === 'verified' && (
-          <div className="space-y-4">
-            <p className="text-lg font-semibold">Akun ini sudah diverifikasi sebelumnya.</p>
-            <Button type="button" className="w-full" onClick={() => router.push('/verify/success')}>
-              Buka Halaman Sukses
-            </Button>
+        {token ? (
+          <div className="rounded-xl bg-black/40 p-4 text-[11px] text-white/60 break-all">
+            <p className="font-semibold text-white/70">Token</p>
+            <p>{token}</p>
+          </div>
+        ) : (
+          <div className="rounded-xl bg-red-500/20 p-3 text-sm text-red-200">
+            {copy.tokenMissing}
           </div>
         )}
 
-        {!info && !error && <p className="text-white/60">Mengambil data verifikasi...</p>}
-      </Card>
-    </Layout>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <CaptchaBlock onSolved={setCaptchaResult} siteKey={siteKey} />
+          <button
+            type="submit"
+            className="w-full rounded-xl bg-emerald-500 py-3 text-black font-semibold hover:bg-emerald-400 transition"
+            disabled={!token}
+          >
+            {copy.button}
+          </button>
+        </form>
+
+        {status && <p className="text-xs text-center text-emerald-300">{status}</p>}
+        {error && <p className="text-xs text-center text-red-300">{error}</p>}
+
+        <QrCodeBlock value={qrValue} />
+
+        <p className="text-[11px] text-center text-white/40">{copy.footer}</p>
+      </div>
+    </main>
   );
 }

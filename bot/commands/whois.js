@@ -1,8 +1,7 @@
-// `/whois` command surfaces verification badge and profile metadata.
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const client = require('../discordClient');
-const { findLatestByUser } = require('../../api/models/Token');
-const { listProfiles } = require('../../api/models/UserProfile');
+const { findLatestByUser } = require('../../api/models/Tokens');
+const { getUserProfile } = require('../../api/models/Users');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -25,13 +24,12 @@ module.exports = {
     }
 
     const tokenDoc = await findLatestByUser(target.id);
-    const profiles = await listProfiles(500);
-    const profile = profiles.find((p) => p.userId === target.id);
+    const profile = await getUserProfile(target.id, process.env.GUILD_ID);
 
     const embed = new EmbedBuilder()
       .setTitle(`Profil ${target.username}`)
       .setThumbnail(target.displayAvatarURL({ size: 256 }))
-      .setColor(profile?.accentColor || 0x5865f2)
+      .setColor((profile?.accentColor as number | undefined) || 0x5865f2)
       .addFields([
         {
           name: 'Badge',
@@ -46,7 +44,7 @@ module.exports = {
       ]);
 
     if (profile?.bannerUrl) {
-      embed.setImage(`https://cdn.discordapp.com/banners/${target.id}/${profile.bannerUrl}?size=512`);
+      embed.setImage(profile.bannerUrl);
     }
 
     await interaction.reply({

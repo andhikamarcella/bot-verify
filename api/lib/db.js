@@ -1,6 +1,3 @@
-// Shared MongoDB connection helper that ensures we only establish a single
-// client across the entire application lifecycle. The URI must be provided via
-// the environment to support deployments like Render with MongoDB Atlas.
 const { MongoClient } = require('mongodb');
 
 let cachedClient = null;
@@ -16,9 +13,7 @@ async function connectMongo() {
     throw new Error('MONGO_URI is not defined in environment variables');
   }
 
-  const client = new MongoClient(uri, {
-    ignoreUndefined: true,
-  });
+  const client = new MongoClient(uri);
   await client.connect();
 
   const dbNameFromUri = uri.split('/')[3]?.split('?')[0] || 'verifybot';

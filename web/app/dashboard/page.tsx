@@ -1,145 +1,109 @@
 'use client';
-// @ts-nocheck
-import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import dynamic from 'next/dynamic';
-import Card from '../../components/Card';
-import Layout from '../../components/Layout';
-import { apiFetch } from '../../lib/api';
 
-const Line = dynamic(() => import('react-chartjs-2').then((mod) => mod.Line), { ssr: false });
+import { useEffect, useState } from 'react';
+import { getApiBaseUrl } from '../../lib/api';
+import { StatsCards } from '../../components/StatsCards';
+import { LineChartDaily } from '../../components/LineChartDaily';
 
-const chartJsRegister = async () => {
-  const Chart = await import('chart.js');
-  const { Chart: ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend } = Chart;
-  ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
-};
+interface MetricsResponse {
+  ok: boolean;
+  totalVerified: number;
+  totalFailed: number;
+  totalBanned: number;
+  graphData: Array<{ _id: string; verifiedCount: number; failedCount: number; bannedCount: number }>;
+  ipHashLogs: Array<{ ipHash: string; userIds: string[]; count: number; lastAt: string }>;
+}
 
 export default function DashboardPage() {
-  const params = useSearchParams();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [payload, setPayload] = useState(null);
+  const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
+  const [error, setError] = useState<string>('');
+  const apiBase = getApiBaseUrl();
+  const adminKey = process.env.NEXT_PUBLIC_ADMIN_KEY || '';
 
   useEffect(() => {
-    chartJsRegister();
-  }, []);
-
-  useEffect(() => {
-    const key = params.get('key');
-    if (!key) {
-      setError('Admin key tidak ditemukan. Tambahkan ?key=SECRET pada URL.');
-      return;
-    }
-    setLoading(true);
-    apiFetch('/api/dashboard/metrics', {
+    fetch(`${apiBase}/api/dashboard/metrics`, {
       headers: {
-        Authorization: `Bearer ${key}`,
+        Authorization: `Bearer ${adminKey}`,
       },
     })
-      .then((res) => {
-        if (!res.ok) throw new Error(res.error || 'forbidden');
-        setPayload(res);
+      .then((res) => res.json())
+      .then((data: MetricsResponse) => {
+        if (!data.ok) {
+          setError('Unauthorized');
+          return;
+        }
+        setMetrics(data);
       })
-      .catch(() => {
-        setError('Tidak bisa mengambil data dashboard. Pastikan ADMIN_KEY benar.');
-      })
-      .finally(() => setLoading(false));
-  }, [params]);
+      .catch(() => setError('Failed to load metrics.'));
+  }, [adminKey, apiBase]);
 
-  const chartData = useMemo(() => {
-    if (!payload?.metrics?.dailyStats) return null;
-    const labels = payload.metrics.dailyStats.map((stat) => stat._id);
-    return {
-      labels,
-      datasets: [
-        {
-          label: 'Verified',
-          data: payload.metrics.dailyStats.map((stat) => stat.verified),
-          borderColor: '#22c55e',
-          backgroundColor: 'rgba(34,197,94,0.25)',
-        },
-        {
-          label: 'Failed',
-          data: payload.metrics.dailyStats.map((stat) => stat.failed),
-          borderColor: '#ef4444',
-          backgroundColor: 'rgba(239,68,68,0.25)',
-        },
-        {
-          label: 'Trusted',
-          data: payload.metrics.dailyStats.map((stat) => stat.trusted),
-          borderColor: '#38bdf8',
-          backgroundColor: 'rgba(56,189,248,0.25)',
-        },
-        {
-          label: 'Banned',
-          data: payload.metrics.dailyStats.map((stat) => stat.banned),
-          borderColor: '#f97316',
-          backgroundColor: 'rgba(249,115,22,0.25)',
-        },
-      ],
-    };
-  }, [payload]);
+  if (error) {
+    return (
+      <main className="min-h-screen bg-neutral-950 text-white flex items-center justify-center p-6">
+        <div className="rounded-3xl bg-neutral-900/60 border border-white/10 p-6 text-center max-w-md">
+          <p className="text-sm text-red-300">{error}</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!metrics) {
+    return (
+      <main className="min-h-screen bg-neutral-950 text-white flex items-center justify-center p-6">
+        <p className="text-sm text-white/60">Loading metrics…</p>
+      </main>
+    );
+  }
 
   return (
-    <Layout headline="Admin Dashboard" description="Pantau kesehatan verifikasi dan potensi ancaman.">
-      <div className="space-y-6">
-        {error && <Card className="border-red-400/30 bg-red-500/10 text-red-200">{error}</Card>}
-        {loading && <Card>Loading metrics...</Card>}
-        {payload?.metrics && (
-          <Card className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div>
-                <p className="text-sm text-white/60">Total Verified</p>
-                <p className="text-2xl font-semibold">{payload.metrics.totals?.verified || 0}</p>
-              </div>
-              <div>
-                <p className="text-sm text-white/60">Failed Attempts</p>
-                <p className="text-2xl font-semibold">{payload.metrics.totals?.failed || 0}</p>
-              </div>
-              <div>
-                <p className="text-sm text-white/60">Trusted Auto</p>
-                <p className="text-2xl font-semibold">{payload.metrics.totals?.trusted || 0}</p>
-              </div>
-              <div>
-                <p className="text-sm text-white/60">Banned / Flagged</p>
-                <p className="text-2xl font-semibold">{payload.metrics.totals?.banned || 0}</p>
-              </div>
-            </div>
-            {chartData && (
-              <div className="h-64">
-                <Line data={chartData} options={{ responsive: true, maintainAspectRatio: false }} />
-              </div>
-            )}
-          </Card>
-        )}
+    <main className="min-h-screen bg-neutral-950 text-white p-6">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
+        <header className="space-y-2">
+          <h1 className="text-3xl font-semibold">Verification Dashboard</h1>
+          <p className="text-sm text-white/60">
+            Lihat performa harian verifikasi, statistik role, dan log IP yang mencurigakan.
+          </p>
+        </header>
 
-        {payload?.ipHashes && (
-          <Card>
-            <h2 className="text-xl font-semibold">IP Hash Logs</h2>
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full divide-y divide-white/10 text-left text-sm">
-                <thead>
-                  <tr>
-                    <th className="px-3 py-2 font-semibold">Hash</th>
-                    <th className="px-3 py-2 font-semibold">Attempts</th>
-                    <th className="px-3 py-2 font-semibold">Unique Users</th>
+        <StatsCards
+          stats={[
+            { label: 'Total Verified', value: metrics.totalVerified, tone: 'emerald' },
+            { label: 'Total Failed', value: metrics.totalFailed, tone: 'amber' },
+            { label: 'Total Banned', value: metrics.totalBanned, tone: 'rose' },
+          ]}
+        />
+
+        <section className="rounded-3xl border border-white/10 bg-neutral-900/40 p-6 shadow-xl">
+          <h2 className="text-lg font-semibold mb-4">Aktivitas Harian</h2>
+          <LineChartDaily data={metrics.graphData} />
+        </section>
+
+        <section className="rounded-3xl border border-white/10 bg-neutral-900/40 p-6 shadow-xl">
+          <h2 className="text-lg font-semibold mb-4">IP Hash Logs</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-white/60">
+                <tr>
+                  <th className="pb-3">IP Hash</th>
+                  <th className="pb-3">Unique Users</th>
+                  <th className="pb-3">Attempts</th>
+                  <th className="pb-3">Last Activity</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {metrics.ipHashLogs.map((log) => (
+                  <tr key={log.ipHash} className="text-white/80">
+                    <td className="py-3 font-mono text-xs">{log.ipHash}</td>
+                    <td className="py-3">{log.userIds.length}</td>
+                    <td className="py-3">{log.count}</td>
+                    <td className="py-3 text-white/60">{new Date(log.lastAt).toLocaleString()}</td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {payload.ipHashes.map((entry) => (
-                    <tr key={entry.hash}>
-                      <td className="px-3 py-2 font-mono text-xs">{entry.hash}</td>
-                      <td className="px-3 py-2">{entry.attempts}</td>
-                      <td className="px-3 py-2">{entry.uniqueUsers}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
-    </Layout>
+    </main>
   );
 }

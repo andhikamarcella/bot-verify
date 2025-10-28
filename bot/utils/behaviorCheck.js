@@ -1,35 +1,20 @@
-// Simple heuristics to mark first-time messages that look suspicious.
-const SUSPECT_PATTERNS = [/http(s?):\/\//i, /discord\.gg/i];
+function analyzeFirstMessageBehavior(content) {
+  const tooManyMentions = (content.match(/<@/g) || []).length >= 3;
+  const hasSketchyLink = /(bit\.ly|tinyurl\.com|discord\.gift)/i.test(content);
+  const isCapsSpam = content.length > 20 && content === content.toUpperCase();
 
-function analyzeMessage(content) {
-  if (!content) return { suspicious: false, reasons: [] };
-  const trimmed = content.trim();
-  const reasons = [];
-  const mentionCount = (trimmed.match(/<@/g) || []).length;
-  const uppercaseRatio = trimmed.replace(/[^A-Z]/g, '').length / Math.max(trimmed.length, 1);
-
-  if (mentionCount >= 3) {
-    reasons.push('too-many-mentions');
+  if (tooManyMentions) {
+    return { suspicious: true, reason: 'mass-mention' };
   }
-
-  if (uppercaseRatio > 0.7 && trimmed.length > 12) {
-    reasons.push('shouting');
+  if (hasSketchyLink) {
+    return { suspicious: true, reason: 'suspicious link' };
   }
-
-  if (SUSPECT_PATTERNS.some((pattern) => pattern.test(trimmed))) {
-    reasons.push('link-detected');
+  if (isCapsSpam) {
+    return { suspicious: true, reason: 'caps spam' };
   }
-
-  if (trimmed.length < 4) {
-    reasons.push('too-short');
-  }
-
-  return {
-    suspicious: reasons.length > 0,
-    reasons,
-  };
+  return { suspicious: false };
 }
 
 module.exports = {
-  analyzeMessage,
+  analyzeFirstMessageBehavior,
 };

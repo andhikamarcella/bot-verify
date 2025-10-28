@@ -1,8 +1,9 @@
-// @ts-nocheck
 const baseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL || process.env.API_BASE_URL || 'http://localhost:3001';
 
-export async function apiFetch(path, options = {}) {
+type FetchOptions = RequestInit & { body?: BodyInit | null };
+
+export async function apiFetch<T = unknown>(path: string, options: FetchOptions = {}) {
   const url = `${baseUrl}${path}`;
   const res = await fetch(url, {
     ...options,
@@ -13,10 +14,9 @@ export async function apiFetch(path, options = {}) {
     },
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || 'Request failed');
+    throw new Error(`Request failed with status ${res.status}`);
   }
-  return res.json();
+  return (await res.json()) as T;
 }
 
 export function getApiBaseUrl() {
