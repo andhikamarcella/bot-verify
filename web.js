@@ -205,8 +205,7 @@ app.post('/verify', async (req, res) => {
     deleteToken(token);
 
     const successHtml = `
-      <h2 class="success">Verifikasi berhasil ✅</h2>
-      <p>Kamu sekarang sudah menjadi Member.</p>
+      <p class="success">Verifikasi berhasil ✅ kamu sekarang sudah menjadi Member.</p>
     `;
     res.send(renderPage('Verifikasi Berhasil', successHtml));
   } catch (error) {
