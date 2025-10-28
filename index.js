@@ -1,26 +1,30 @@
 /**
- * Cara menjalankan proyek ini secara lokal:
- * 1. Jalankan `npm install` di direktori root untuk memasang dependensi bot + API.
- * 2. Masuk ke folder Next.js (`cd nextapp`) lalu jalankan `npm install` untuk dependensi frontend.
- * 3. Buat file .env berdasarkan .env.example dan isi seluruh variabel yang diperlukan.
- * 4. Daftarkan perintah slash satu kali dengan `node server/registerCommands.js`.
- * 5. Jalankan proses bot + API menggunakan `node index.js` (atau npm start).
- * 6. Jalankan frontend secara terpisah: `cd nextapp && npm run dev` untuk pengembangan.
- *    Saat deploy, bot/API dan Next.js frontend bisa ditempatkan di layanan terpisah.
+ * Cara menjalankan aplikasi secara lokal:
+ * 1. salin .env.example menjadi .env dan isi seluruh variabel.
+ * 2. npm install
+ * 3. cd web && npm install
+ * 4. kembali ke root, jalankan `node registerCommands.js` sekali untuk mendaftarkan slash command.
+ * 5. jalankan backend (bot + API) dengan `node index.js`.
+ * 6. jalankan frontend Next.js di terminal terpisah: `cd web && npm run dev`.
+ * Pastikan MongoDB berjalan secara lokal atau atur MONGODB_URI di environment.
  */
 require('dotenv').config();
-
-const { startBot } = require('./server/bot');
-const { startApiServer } = require('./server/api');
+const { startBot } = require('./bot/bot');
+const { startApiServer } = require('./api');
 
 async function bootstrap() {
   try {
     await startBot();
     await startApiServer();
+    console.log('🚀 Bot dan API sudah berjalan.');
   } catch (error) {
-    console.error('Gagal memulai layanan utama:', error);
+    console.error('Gagal memulai sistem', error);
     process.exit(1);
   }
 }
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled:', reason);
+});
 
 bootstrap();

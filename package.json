@@ -1,26 +1,23 @@
 {
   "name": "discord-verification-suite",
   "version": "1.0.0",
-  "private": true,
-  "description": "Discord verification bot + Express API backend for Next.js verification frontend.",
+  "description": "Discord verification bot with Express API and Next.js portal",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "register": "node server/registerCommands.js"
+    "dev": "nodemon index.js",
+    "register": "node registerCommands.js"
   },
-  "keywords": [
-    "discord",
-    "verification",
-    "express",
-    "recaptcha",
-    "nextjs"
-  ],
-  "author": "",
-  "license": "MIT",
   "dependencies": {
+    "cors": "^2.8.5",
     "discord.js": "^14.14.1",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "node-fetch": "^3.3.2"
+    "mongodb": "^6.5.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
   }
 }
