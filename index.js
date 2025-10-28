@@ -6,14 +6,21 @@
  * 4. kembali ke root, jalankan `node registerCommands.js` sekali untuk mendaftarkan slash command.
  * 5. jalankan backend (bot + API) dengan `node index.js`.
  * 6. jalankan frontend Next.js di terminal terpisah: `cd web && npm run dev`.
- * Pastikan MongoDB berjalan secara lokal atau atur MONGODB_URI di environment.
+ * Pastikan MongoDB Atlas URI sudah diisi pada MONGO_URI atau gunakan cluster lokal sendiri.
  */
 require('dotenv').config();
 const { startBot } = require('./bot/bot');
 const { startApiServer } = require('./api');
+const { connectMongo } = require('./api/lib/db');
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Rejection:', reason);
+});
 
 async function bootstrap() {
   try {
+    console.log('DEBUG using MONGO_URI?', !!process.env.MONGO_URI);
+    await connectMongo();
     await startBot();
     await startApiServer();
     console.log('🚀 Bot dan API sudah berjalan.');
@@ -22,9 +29,5 @@ async function bootstrap() {
     process.exit(1);
   }
 }
-
-process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled:', reason);
-});
 
 bootstrap();

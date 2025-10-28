@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const { Routes } = require('discord.js');
 const client = require('../../bot/discordClient');
 const {
@@ -38,8 +39,7 @@ router.post('/create-token', async (req, res) => {
       res.status(400).json({ ok: false, error: 'missing-user' });
       return;
     }
-    const { v4: uuidv4 } = require('uuid');
-    const token = uuidv4();
+    const token = crypto.randomUUID();
     await createTokenDocument({
       token,
       userId,

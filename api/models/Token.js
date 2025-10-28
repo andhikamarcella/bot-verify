@@ -1,11 +1,15 @@
 // Token persistence helpers for verification flow.
-const { ObjectId } = require('mongodb');
-const { getCollection } = require('../lib/db');
+const { connectMongo } = require('../lib/db');
 
 const COLLECTION = 'verification_tokens';
 
+async function collection() {
+  const db = await connectMongo();
+  return db.collection(COLLECTION);
+}
+
 async function createTokenDocument({ token, userId, username, locale, guildId, trustedSource }) {
-  const col = await getCollection(COLLECTION);
+  const col = await collection();
   const doc = {
     token,
     userId,
@@ -27,12 +31,12 @@ async function createTokenDocument({ token, userId, username, locale, guildId, t
 }
 
 async function findToken(token) {
-  const col = await getCollection(COLLECTION);
+  const col = await collection();
   return col.findOne({ token });
 }
 
 async function findLatestByUser(userId) {
-  const col = await getCollection(COLLECTION);
+  const col = await collection();
   return col
     .find({ userId })
     .sort({ createdAt: -1 })
@@ -41,13 +45,13 @@ async function findLatestByUser(userId) {
 }
 
 async function updateToken(token, update) {
-  const col = await getCollection(COLLECTION);
+  const col = await collection();
   await col.updateOne({ token }, { $set: update });
   return findToken(token);
 }
 
 async function markVerified(token, { badgeEmoji, badgeName, ipHash, status }) {
-  const col = await getCollection(COLLECTION);
+  const col = await collection();
   const now = new Date();
   const update = {
     status: status || 'verified',
@@ -66,7 +70,7 @@ async function markVerified(token, { badgeEmoji, badgeName, ipHash, status }) {
 }
 
 async function incrementFailure(token, reason, ipHash) {
-  const col = await getCollection(COLLECTION);
+  const col = await collection();
   const modifier = {
     $inc: { attempts: 1 },
     $set: { failureReason: reason, status: 'failed' },
@@ -78,7 +82,7 @@ async function incrementFailure(token, reason, ipHash) {
 }
 
 async function getMetrics() {
-  const col = await getCollection(COLLECTION);
+  const col = await collection();
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 14);
   const pipeline = [
@@ -145,7 +149,7 @@ async function getMetrics() {
 }
 
 async function getLeaderboard(limit = 25) {
-  const col = await getCollection(COLLECTION);
+  const col = await collection();
   const docs = await col
     .find({ status: { $in: ['verified', 'trusted'] } })
     .sort({ verifiedAt: -1 })
@@ -162,7 +166,7 @@ async function getLeaderboard(limit = 25) {
 }
 
 async function listIpHashes() {
-  const col = await getCollection(COLLECTION);
+  const col = await collection();
   const pipeline = [
     { $unwind: '$ipHashes' },
     {

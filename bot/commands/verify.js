@@ -1,6 +1,13 @@
 // Slash command that guides members through the verification DM flow.
-const { SlashCommandBuilder, Routes, EmbedBuilder } = require('discord.js');
-const { v4: uuidv4 } = require('uuid');
+const {
+  SlashCommandBuilder,
+  Routes,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+} = require('discord.js');
+const crypto = require('crypto');
 const client = require('../discordClient');
 const { createTokenDocument, markVerified } = require('../../api/models/Token');
 const { upsertUserProfile } = require('../../api/models/UserProfile');
@@ -51,7 +58,7 @@ async function sendWelcomeMessage(userId) {
 
 async function autoVerifyTrustedMember(interaction, member, trustedGuildId) {
   await assignRole(member, MEMBER_ROLE_ID);
-  const token = uuidv4();
+  const token = crypto.randomUUID();
   await createTokenDocument({
     token,
     userId: member.id,
@@ -158,7 +165,7 @@ module.exports = {
       }
     }
 
-    const token = uuidv4();
+    const token = crypto.randomUUID();
     await createTokenDocument({
       token,
       userId: interaction.user.id,
@@ -168,12 +175,24 @@ module.exports = {
     });
 
     const verificationUrl = `${FRONTEND_URL.replace(/\/$/, '')}/verify?token=${token}`;
+    const components = [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setLabel('Verify Me').setStyle(ButtonStyle.Link).setURL(verificationUrl)
+      ),
+    ];
 
     try {
       await interaction.user.send({
-        content: `Hai ${interaction.user.username}! Klik tautan ini untuk verifikasi: ${verificationUrl}`,
+        content: [
+          `Hai ${interaction.user.username}! Klik tombol di bawah untuk memulai verifikasi akun kamu.`,
+          '',
+          'Kalau tombol tidak muncul, kamu bisa pakai tautan berikut:',
+          verificationUrl,
+        ].join('\n'),
+        components,
       });
     } catch (error) {
+      console.error('Gagal DM user:', error);
       await interaction.reply({
         content: 'Tidak bisa mengirim DM ke kamu. Buka DM kamu lalu coba lagi.',
         flags: 64,
@@ -192,7 +211,7 @@ module.exports = {
     }
 
     await interaction.reply({
-      content: 'Cek DM kamu ya 💌 Kami sudah kirim tautan verifikasi.',
+      content: 'Cek DM kamu ya 💌 Kami sudah kirim tombol verifikasi.',
       flags: 64,
     });
   },

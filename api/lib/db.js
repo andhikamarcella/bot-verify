@@ -1,42 +1,36 @@
-// Centralised MongoDB connection helper using the official driver.
+// Shared MongoDB connection helper that ensures we only establish a single
+// client across the entire application lifecycle. The URI must be provided via
+// the environment to support deployments like Render with MongoDB Atlas.
 const { MongoClient } = require('mongodb');
-const debug = require('util').debuglog('db');
 
-let client;
-let db;
-
-const DEFAULT_URI = 'mongodb://127.0.0.1:27017/discord-verification';
-const DB_NAME = 'discordVerification';
+let cachedClient = null;
+let cachedDb = null;
 
 async function connectMongo() {
-  if (db) {
-    return db;
+  if (cachedDb) {
+    return cachedDb;
   }
-  const uri = process.env.MONGODB_URI || DEFAULT_URI;
-  if (!client) {
-    client = new MongoClient(uri, {
-      ignoreUndefined: true,
-    });
-    client.on('error', (err) => {
-      console.error('MongoDB client error', err);
-    });
-  }
-  if (!client.topology || client.topology.isDestroyed()) {
-    await client.connect();
-    debug('MongoDB client connected');
-  } else if (!client.topology.isConnected()) {
-    await client.connect();
-  }
-  db = client.db(DB_NAME);
-  return db;
-}
 
-async function getCollection(name) {
-  const database = await connectMongo();
-  return database.collection(name);
+  const uri = process.env.MONGO_URI;
+  if (!uri) {
+    throw new Error('MONGO_URI is not defined in environment variables');
+  }
+
+  const client = new MongoClient(uri, {
+    ignoreUndefined: true,
+  });
+  await client.connect();
+
+  const dbNameFromUri = uri.split('/')[3]?.split('?')[0] || 'verifybot';
+  const db = client.db(dbNameFromUri);
+
+  cachedClient = client;
+  cachedDb = db;
+
+  console.log('✅ MongoDB connected!');
+  return db;
 }
 
 module.exports = {
   connectMongo,
-  getCollection,
 };
