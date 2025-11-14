@@ -1,4 +1,5 @@
 const express = require('express');
+const { Events } = require('discord.js');
 const client = require('../../bot/discordClient');
 const { connectMongo } = require('../lib/db');
 
@@ -7,7 +8,7 @@ const router = express.Router();
 async function ensureReady() {
   await connectMongo();
   if (!client.isReady()) {
-    await new Promise((resolve) => client.once('ready', resolve));
+    await new Promise((resolve) => client.once(Events.ClientReady, resolve));
   }
 }
 

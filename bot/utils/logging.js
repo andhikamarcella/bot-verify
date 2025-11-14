@@ -34,9 +34,13 @@ async function sendVerificationLog({
     if (!channel) return;
 
     const risk = describeRisk(riskScore);
+    const isInfo = type === 'info';
+    const title =
+      type === 'success' ? '✅ Verification Success' : isInfo ? '📝 Verification Log' : '⚠️ Verification Event';
+    const embedColor = isInfo ? Colors.Blurple : pickColor(risk.label);
     const embed = new EmbedBuilder()
-      .setTitle(`${type === 'success' ? '✅ Verification Success' : '⚠️ Verification Event'}`)
-      .setColor(pickColor(risk.label))
+      .setTitle(title)
+      .setColor(embedColor)
       .setTimestamp(new Date())
       .addFields(
         { name: 'User', value: `${user?.tag || member?.user?.tag || 'Unknown'} (${member?.id || user?.id || 'unknown'})`, inline: false },

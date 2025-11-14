@@ -6,6 +6,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ActivityType,
 } = require('discord.js');
 const client = require('./discordClient');
 const { analyzeFirstMessageBehavior } = require('./utils/behaviorCheck');
@@ -41,6 +42,18 @@ const reminderTimers = new Map();
 const verifiedCache = new Map();
 const mediaWarningCooldown = new Map();
 
+const presenceMessages = [
+  'Verifying members…',
+  'Protecting servers…',
+  'Use /verify to get started',
+  'Need help? Try /help',
+  'Join our server: discord.gg/w3ENr2uEeH',
+];
+
+function reminderKey(guildId, userId) {
+  return `${guildId || GUILD_ID}:${userId}`;
+}
+
 function pruneMap(map, ttl) {
   const now = Date.now();
   for (const [key, expires] of map.entries()) {
@@ -50,17 +63,18 @@ function pruneMap(map, ttl) {
   }
 }
 
-function cancelReminder(userId) {
-  const timer = reminderTimers.get(userId);
+function cancelReminder(userId, guildId = GUILD_ID) {
+  const key = reminderKey(guildId, userId);
+  const timer = reminderTimers.get(key);
   if (timer) {
     clearTimeout(timer);
   }
-  reminderTimers.delete(userId);
+  reminderTimers.delete(key);
 }
 
-function registerRecentVerification(userId) {
+function registerRecentVerification(userId, guildId = GUILD_ID) {
   recentlyVerified.set(userId, Date.now());
-  cancelReminder(userId);
+  cancelReminder(userId, guildId);
   verifiedCache.set(userId, { value: true, expires: Date.now() + 10 * 60 * 1000 });
 }
 
@@ -94,14 +108,18 @@ async function isUserVerified(guildId, userId) {
 
 async function scheduleReminder(member) {
   const config = await fetchConfig(member.guild.id);
-  if (!config.reminderEnabled) {
+  const reminderEnabled =
+    typeof config.dmReminderEnabled === 'boolean' ? config.dmReminderEnabled : config.reminderEnabled;
+  if (!reminderEnabled) {
     return;
   }
-  const delayMinutes = Math.max(config.reminderDelayMinutes || 5, 1);
+  const rawDelay = config.dmReminderDelayMinutes ?? config.reminderDelayMinutes ?? 5;
+  const delayMinutes = Math.max(rawDelay || 5, 1);
   const delayMs = delayMinutes * 60 * 1000;
-  cancelReminder(member.id);
+  cancelReminder(member.id, member.guild.id);
+  const key = reminderKey(member.guild.id, member.id);
   const timer = setTimeout(async () => {
-    reminderTimers.delete(member.id);
+    reminderTimers.delete(key);
     try {
       const verified = await isUserVerified(member.guild.id, member.id);
       if (verified) {
@@ -150,7 +168,7 @@ async function scheduleReminder(member) {
       console.warn('Gagal mengirim pengingat verifikasi:', error?.message);
     }
   }, delayMs);
-  reminderTimers.set(member.id, timer);
+  reminderTimers.set(key, timer);
 }
 
 async function handleMemberJoin(member) {
@@ -200,6 +218,19 @@ async function handleMemberJoin(member) {
     suspectReasons,
   });
   await setRiskScore(member.id, member.guild.id, riskScore);
+
+  await sendVerificationLog({
+    client,
+    guildId: member.guild.id,
+    config,
+    user: member.user,
+    member,
+    type: 'info',
+    status: 'JOINED',
+    riskScore,
+    suspectReasons,
+    reason: `Account age ≈ ${accountAgeDays.toFixed(1)} hari`,
+  });
 
   if (blacklistEntry || suspectReasons.length > 0) {
     await sendVerificationLog({
@@ -297,6 +328,24 @@ async function handleMessageCreate(message) {
 
 client.once(Events.ClientReady, () => {
   console.log(`Bot masuk sebagai ${client.user.tag}`);
+
+  let presenceIndex = 0;
+  const applyPresence = () => {
+    const message = presenceMessages[presenceIndex % presenceMessages.length];
+    client.user.setPresence({
+      activities: [
+        {
+          name: message,
+          type: ActivityType.Playing,
+        },
+      ],
+      status: 'online',
+    });
+    presenceIndex = (presenceIndex + 1) % presenceMessages.length;
+  };
+
+  applyPresence();
+  setInterval(applyPresence, 45 * 1000);
 });
 
 client.on(Events.GuildMemberAdd, (member) => {

@@ -7,6 +7,8 @@ const DEFAULT_CONFIG = {
   logsChannelId: null,
   reminderEnabled: true,
   reminderDelayMinutes: 10,
+  dmReminderEnabled: true,
+  dmReminderDelayMinutes: 10,
   minAccountAgeDays: 7,
   autoNickname: false,
   nicknameTemplate: '{{username}}',
@@ -29,11 +31,24 @@ function mergeConfig(doc, guildId) {
   if (!doc) {
     return base;
   }
-  return {
+  const merged = {
     ...base,
     ...doc,
     guildId,
   };
+  if (typeof merged.dmReminderEnabled === 'undefined') {
+    merged.dmReminderEnabled = merged.reminderEnabled;
+  }
+  if (typeof merged.dmReminderDelayMinutes === 'undefined') {
+    merged.dmReminderDelayMinutes = merged.reminderDelayMinutes;
+  }
+  if (typeof merged.reminderEnabled === 'undefined') {
+    merged.reminderEnabled = merged.dmReminderEnabled;
+  }
+  if (typeof merged.reminderDelayMinutes === 'undefined') {
+    merged.reminderDelayMinutes = merged.dmReminderDelayMinutes;
+  }
+  return merged;
 }
 
 async function getGuildConfig(guildId) {
@@ -56,6 +71,18 @@ async function updateGuildConfig(guildId, updates) {
     ...updates,
     settingsUpdatedAt: new Date(),
   };
+  if (Object.prototype.hasOwnProperty.call(updates, 'dmReminderEnabled')) {
+    payload.reminderEnabled = updates.dmReminderEnabled;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, 'dmReminderDelayMinutes')) {
+    payload.reminderDelayMinutes = updates.dmReminderDelayMinutes;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, 'reminderEnabled')) {
+    payload.dmReminderEnabled = updates.reminderEnabled;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, 'reminderDelayMinutes')) {
+    payload.dmReminderDelayMinutes = updates.reminderDelayMinutes;
+  }
   await collection.updateOne(
     { guildId },
     {

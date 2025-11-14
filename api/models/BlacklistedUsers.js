@@ -9,25 +9,45 @@ async function getCollection() {
 
 async function getBlacklistEntry(userId, guildId) {
   const collection = await getCollection();
-  return collection.findOne({ userId, guildId });
+  return collection.findOne({
+    userId,
+    $or: [
+      { scope: 'global' },
+      { scope: 'guild', guildId },
+      { scope: { $exists: false }, guildId },
+    ],
+  });
 }
 
 async function isBlacklisted(userId, guildId) {
   const collection = await getCollection();
-  const doc = await collection.findOne({ userId, guildId });
+  const doc = await collection.findOne({
+    userId,
+    $or: [
+      { scope: 'global' },
+      { scope: 'guild', guildId },
+      { scope: { $exists: false }, guildId },
+    ],
+  });
   return Boolean(doc);
 }
 
-async function addToBlacklist({ userId, guildId, reason, addedBy }) {
+async function addToBlacklist({ userId, guildId, reason, addedBy, scope = 'guild' }) {
   const collection = await getCollection();
+  const normalizedScope = scope === 'global' ? 'global' : 'guild';
   await collection.updateOne(
-    { userId, guildId },
+    {
+      userId,
+      scope: normalizedScope,
+      guildId: normalizedScope === 'guild' ? guildId : null,
+    },
     {
       $set: {
         userId,
-        guildId,
+        guildId: normalizedScope === 'guild' ? guildId : null,
         reason: reason || 'unspecified',
         addedBy: addedBy || null,
+        scope: normalizedScope,
         createdAt: new Date(),
       },
     },
@@ -36,21 +56,47 @@ async function addToBlacklist({ userId, guildId, reason, addedBy }) {
   return getBlacklistEntry(userId, guildId);
 }
 
-async function removeFromBlacklist(userId, guildId) {
+async function removeFromBlacklist(userId, guildId, scope = 'guild') {
   const collection = await getCollection();
-  await collection.deleteOne({ userId, guildId });
+  if (scope === 'global') {
+    await collection.deleteMany({ userId, scope: 'global' });
+    return;
+  }
+  if (scope === 'all') {
+    await collection.deleteMany({ userId });
+    return;
+  }
+  await collection.deleteMany({
+    userId,
+    $or: [
+      { scope: 'guild', guildId },
+      { scope: { $exists: false }, guildId },
+    ],
+  });
 }
 
 async function listBlacklisted(guildId, page = 1, pageSize = 20) {
   const collection = await getCollection();
   const skip = Math.max(page - 1, 0) * pageSize;
   const cursor = collection
-    .find({ guildId })
+    .find({
+      $or: [
+        { scope: 'global' },
+        { scope: 'guild', guildId },
+        { scope: { $exists: false }, guildId },
+      ],
+    })
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(pageSize);
   const items = await cursor.toArray();
-  const total = await collection.countDocuments({ guildId });
+  const total = await collection.countDocuments({
+    $or: [
+      { scope: 'global' },
+      { scope: 'guild', guildId },
+      { scope: { $exists: false }, guildId },
+    ],
+  });
   return { items, total, page, pageSize };
 }
 

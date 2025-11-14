@@ -62,7 +62,7 @@ async function handleStart(interaction) {
     });
     return;
   }
-  if (shouldRateLimit(interaction.user.id, 'verify-start', 30 * 1000)) {
+  if (shouldRateLimit(interaction.user.id, `verify-start:${interaction.guildId}`, 30 * 1000)) {
     await interaction.reply({
       content: 'Tolong tunggu sebentar sebelum meminta link verifikasi lagi.',
       flags: 64,

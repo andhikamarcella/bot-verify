@@ -1,5 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
+const { Events } = require('discord.js');
 const client = require('../../bot/discordClient');
 const { createTokenDocument, findToken, setTokenStatus } = require('../models/Tokens');
 const { upsertUserProfile } = require('../models/Users');
@@ -30,7 +31,7 @@ const DISCORD_BROWSER_URL = process.env.DISCORD_BROWSER_URL || null;
 async function ensureReady() {
   await connectMongo();
   if (!client.isReady()) {
-    await new Promise((resolve) => client.once('ready', resolve));
+    await new Promise((resolve) => client.once(Events.ClientReady, resolve));
   }
 }
 
@@ -292,7 +293,7 @@ router.post('/verify', async (req, res) => {
     try {
       const { registerRecentVerification } = require('../../bot/bot');
       if (typeof registerRecentVerification === 'function') {
-        registerRecentVerification(record.userId);
+        registerRecentVerification(record.userId, record.guildId);
       }
     } catch (regErr) {
       console.warn('Failed to flag recent verification', regErr?.message);

@@ -28,12 +28,31 @@ module.exports = {
         .setDescription('Tambahkan user ke blacklist')
         .addUserOption((option) => option.setName('user').setDescription('User yang diblacklist').setRequired(true))
         .addStringOption((option) => option.setName('reason').setDescription('Alasan').setRequired(true))
+        .addStringOption((option) =>
+          option
+            .setName('scope')
+            .setDescription('Ruang lingkup blacklist')
+            .addChoices(
+              { name: 'Guild only', value: 'guild' },
+              { name: 'Global', value: 'global' }
+            )
+        )
     )
     .addSubcommand((sub) =>
       sub
         .setName('remove')
         .setDescription('Hapus user dari blacklist')
         .addUserOption((option) => option.setName('user').setDescription('User yang dihapus').setRequired(true))
+        .addStringOption((option) =>
+          option
+            .setName('scope')
+            .setDescription('Hapus dari blacklist pada lingkup tertentu')
+            .addChoices(
+              { name: 'Guild only', value: 'guild' },
+              { name: 'Global only', value: 'global' },
+              { name: 'Semua entri', value: 'all' }
+            )
+        )
     )
     .addSubcommand((sub) =>
       sub
@@ -49,11 +68,13 @@ module.exports = {
       if (subcommand === 'add') {
         const user = interaction.options.getUser('user');
         const reason = interaction.options.getString('reason');
+        const scope = interaction.options.getString('scope') || 'guild';
         await addToBlacklist({
           userId: user.id,
           guildId: interaction.guildId,
           reason,
           addedBy: interaction.user.id,
+          scope,
         });
         const config = await fetchConfig(interaction.guildId);
         await sendVerificationLog({
@@ -69,13 +90,17 @@ module.exports = {
           suspectReasons: ['manual-blacklist'],
         });
         await interaction.reply({
-          content: `<@${user.id}> telah diblacklist (alasan: ${reason}).`,
+          content: `<@${user.id}> telah diblacklist (${scope.toUpperCase()} • alasan: ${reason}).`,
           flags: 64,
         });
       } else if (subcommand === 'remove') {
         const user = interaction.options.getUser('user');
-        await removeFromBlacklist(user.id, interaction.guildId);
-        await interaction.reply({ content: `<@${user.id}> dihapus dari blacklist.`, flags: 64 });
+        const scope = interaction.options.getString('scope') || 'guild';
+        await removeFromBlacklist(user.id, interaction.guildId, scope);
+        await interaction.reply({
+          content: `<@${user.id}> dihapus dari blacklist (${scope.toUpperCase()}).`,
+          flags: 64,
+        });
       } else if (subcommand === 'list') {
         const page = interaction.options.getInteger('page') || 1;
         const { items, total } = await listBlacklisted(interaction.guildId, page, 10);
@@ -89,12 +114,12 @@ module.exports = {
           .setFooter({ text: `Total ${total} entri • Halaman ${page}` });
         embed.setDescription(
           items
-            .map(
-              (entry) =>
-                `• <@${entry.userId}> — ${entry.reason || 'tanpa alasan'} (ditambah ${new Date(
-                  entry.createdAt
-                ).toISOString()})`
-            )
+            .map((entry) => {
+              const scopeLabel = (entry.scope || 'guild').toUpperCase();
+              return `• <@${entry.userId}> — ${entry.reason || 'tanpa alasan'} (${scopeLabel}, ${new Date(
+                entry.createdAt
+              ).toISOString()})`;
+            })
             .join('\n')
         );
         await interaction.reply({ embeds: [embed], flags: 64 });

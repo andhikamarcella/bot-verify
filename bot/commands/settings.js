@@ -135,9 +135,12 @@ module.exports = {
       ensureAdmin(interaction);
       if (subcommand === 'show') {
         const config = await fetchConfig(interaction.guildId);
+        const reminderEnabled =
+          typeof config.dmReminderEnabled === 'boolean' ? config.dmReminderEnabled : config.reminderEnabled;
+        const reminderDelay = config.dmReminderDelayMinutes ?? config.reminderDelayMinutes ?? 10;
         const lines = [
           `Logs Channel: ${config.logsChannelId ? `<#${config.logsChannelId}>` : 'belum diset'}`,
-          `Reminder: ${config.reminderEnabled ? `ON (${config.reminderDelayMinutes} menit)` : 'OFF'}`,
+          `Reminder: ${reminderEnabled ? `ON (${reminderDelay} menit)` : 'OFF'}`,
           `Min Account Age: ${config.minAccountAgeDays} hari`,
           `Media Restriction: ${config.mediaRestrictionEnabled ? 'ON' : 'OFF'}`,
           `Auto Nickname: ${config.autoNickname ? `ON (template: ${config.nicknameTemplate})` : 'OFF'}`,
@@ -172,11 +175,17 @@ module.exports = {
         await interaction.reply({ content: `Pattern \`${pattern}\` dihapus.`, flags: 64 });
       } else if (subcommand === 'toggle-reminder') {
         const state = interaction.options.getString('state');
-        await updateConfig(interaction.guildId, { reminderEnabled: state === 'on' });
+        await updateConfig(interaction.guildId, {
+          reminderEnabled: state === 'on',
+          dmReminderEnabled: state === 'on',
+        });
         await interaction.reply({ content: `DM reminder sekarang ${state === 'on' ? 'ON' : 'OFF'}.`, flags: 64 });
       } else if (subcommand === 'set-reminder-delay') {
         const minutes = interaction.options.getInteger('minutes');
-        await updateConfig(interaction.guildId, { reminderDelayMinutes: minutes });
+        await updateConfig(interaction.guildId, {
+          reminderDelayMinutes: minutes,
+          dmReminderDelayMinutes: minutes,
+        });
         await interaction.reply({ content: `Delay DM reminder diset ke ${minutes} menit.`, flags: 64 });
       } else if (subcommand === 'toggle-auto-nickname') {
         const state = interaction.options.getString('state');
