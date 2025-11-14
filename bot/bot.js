@@ -34,7 +34,7 @@ async function loadCommands() {
   }
 }
 
-client.once('ready', () => {
+client.once('clientReady', () => {
   console.log(`Bot masuk sebagai ${client.user.tag}`);
 });
 
