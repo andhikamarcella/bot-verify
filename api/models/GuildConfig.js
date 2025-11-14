@@ -1,6 +1,7 @@
 const { connectMongo } = require('../lib/db');
 
-const COLLECTION_NAME = 'guild_configs';
+// Keep the collection name aligned with the legacy schema (`verifybot.guildConfigs`).
+const COLLECTION_NAME = 'guildConfigs';
 
 const DEFAULT_CONFIG = {
   guildId: null,

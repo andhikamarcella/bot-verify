@@ -3,8 +3,10 @@ const { connectMongo } = require('../lib/db');
 const COLLECTION_NAME = 'verificationProfiles';
 
 function resolveIds(data) {
-  const guildID = data.guildId || data.guildID;
-  const userID = data.userId || data.userID;
+  const guildRaw = data.guildId || data.guildID;
+  const userRaw = data.userId || data.userID;
+  const guildID = guildRaw ? String(guildRaw) : null;
+  const userID = userRaw ? String(userRaw) : null;
   if (!guildID || !userID) {
     throw new Error('Missing guildId or userId for verification profile operation');
   }
