@@ -61,11 +61,31 @@ function loadCommandManifest(commandsDir, options = {}) {
 
 async function clearGlobalCommands(rest, clientId) {
   const globalRoute = Routes.applicationCommands(clientId);
-  await rest.put(globalRoute, { body: [] });
-  const remaining = await rest.get(globalRoute);
-  if (Array.isArray(remaining) && remaining.length > 0) {
-    for (const command of remaining) {
+  let commands = [];
+  try {
+    commands = await rest.get(globalRoute);
+  } catch (error) {
+    console.warn('⚠️  Gagal mengambil command global:', error?.message || error);
+    return;
+  }
+
+  if (!Array.isArray(commands) || commands.length === 0) {
+    return;
+  }
+
+  for (const command of commands) {
+    try {
       await rest.delete(Routes.applicationCommand(clientId, command.id));
+    } catch (error) {
+      if (error?.code === 50240) {
+        console.warn(
+          `⚠️  Command global ${command.name} tidak dapat dihapus (entry point). Melewati.`
+        );
+        continue;
+      }
+      console.warn(
+        `⚠️  Gagal menghapus command global ${command.name}: ${error?.message || error}`
+      );
     }
   }
 }
