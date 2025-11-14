@@ -52,21 +52,30 @@ function mergeConfig(doc, guildId) {
   return merged;
 }
 
+function normalizeGuildId(guildId) {
+  if (!guildId) {
+    throw new Error('guildId is required for guild config operations');
+  }
+  return String(guildId);
+}
+
 async function getGuildConfig(guildId) {
+  const guildKey = normalizeGuildId(guildId);
   const collection = await getCollection();
-  const doc = await collection.findOne({ guildId });
+  const doc = await collection.findOne({ guildId: guildKey });
   if (!doc) {
     await collection.updateOne(
-      { guildId },
-      { $setOnInsert: { ...DEFAULT_CONFIG, guildId, settingsUpdatedAt: new Date() } },
+      { guildId: guildKey },
+      { $setOnInsert: { ...DEFAULT_CONFIG, guildId: guildKey, settingsUpdatedAt: new Date() } },
       { upsert: true }
     );
-    return mergeConfig(DEFAULT_CONFIG, guildId);
+    return mergeConfig(DEFAULT_CONFIG, guildKey);
   }
-  return mergeConfig(doc, guildId);
+  return mergeConfig(doc, guildKey);
 }
 
 async function updateGuildConfig(guildId, updates) {
+  const guildKey = normalizeGuildId(guildId);
   const collection = await getCollection();
 
   const sanitized = {};
@@ -99,16 +108,16 @@ async function updateGuildConfig(guildId, updates) {
   }
 
   await collection.updateOne(
-    { guildId },
+    { guildId: guildKey },
     {
       $set: payload,
-      $setOnInsert: { ...DEFAULT_CONFIG, guildId },
+      $setOnInsert: { ...DEFAULT_CONFIG, guildId: guildKey },
     },
     { upsert: true }
   );
 
-  const doc = await collection.findOne({ guildId });
-  return mergeConfig(doc, guildId);
+  const doc = await collection.findOne({ guildId: guildKey });
+  return mergeConfig(doc, guildKey);
 }
 
 module.exports = {

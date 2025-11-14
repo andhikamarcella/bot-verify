@@ -20,13 +20,15 @@ async function getCollection() {
 
 async function getVerificationProfile(userId, guildId) {
   const collection = await getCollection();
-  if (!userId || !guildId) {
+  const userKey = userId ? String(userId) : null;
+  const guildKey = guildId ? String(guildId) : null;
+  if (!userKey || !guildKey) {
     return null;
   }
   return collection.findOne({
     $or: [
-      { userId, guildId },
-      { userID: userId, guildID: guildId },
+      { userId: userKey, guildId: guildKey },
+      { userID: userKey, guildID: guildKey },
     ],
   });
 }
