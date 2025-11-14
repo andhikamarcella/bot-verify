@@ -1,0 +1,12 @@
+node_modules/
+web/node_modules/
+web/.next/
+.next/
+.turbo/
+.swc/
+.env
+.env.local
+npm-debug.log*
+.DS_Store
+.vscode/
+coverage/
