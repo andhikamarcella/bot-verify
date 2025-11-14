@@ -5,6 +5,7 @@ const path = require('path');
 const { REST, Routes } = require('discord.js');
 
 const commands = [];
+const seenNames = new Set();
 
 function loadCommandFiles(dirPath) {
   const entries = fs.readdirSync(dirPath, { withFileTypes: true });
@@ -22,6 +23,12 @@ function loadCommandFiles(dirPath) {
     delete require.cache[require.resolve(fullPath)];
     const command = require(fullPath);
     if (command?.data) {
+      const name = command.data.name;
+      if (seenNames.has(name)) {
+        console.warn(`⚠️  Duplicate command name detected (${name}), skip file: ${fullPath}`);
+        continue;
+      }
+      seenNames.add(name);
       commands.push(command.data.toJSON());
     }
   }
@@ -44,15 +51,15 @@ async function register() {
   );
 
   try {
+    console.log('🧹 Clearing existing global commands...');
+    await rest.put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID), { body: [] });
     console.log(`🧹 Clearing existing commands for guild ${process.env.GUILD_ID}...`);
     await rest.put(route, { body: [] });
 
     console.log(`🔧 Registering ${commands.length} guild commands...`);
     await rest.put(route, { body: commands });
 
-    console.log(
-      `✅ Guild commands registered: ${commands.map((command) => command.name).join(', ')}`
-    );
+    console.log(`✅ Guild commands registered: ${Array.from(seenNames).join(', ')}`);
   } catch (error) {
     console.error('Failed to register commands', error);
   }

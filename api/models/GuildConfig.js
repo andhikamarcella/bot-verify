@@ -67,22 +67,36 @@ async function getGuildConfig(guildId) {
 
 async function updateGuildConfig(guildId, updates) {
   const collection = await getCollection();
+
+  const sanitized = {};
+  for (const [key, value] of Object.entries(updates || {})) {
+    if (typeof key !== 'string' || key.includes('.')) {
+      throw new Error(`Invalid guild config path: ${key}`);
+    }
+    if (typeof value === 'undefined') {
+      continue;
+    }
+    sanitized[key] = value;
+  }
+
   const payload = {
-    ...updates,
+    ...sanitized,
     settingsUpdatedAt: new Date(),
   };
-  if (Object.prototype.hasOwnProperty.call(updates, 'dmReminderEnabled')) {
-    payload.reminderEnabled = updates.dmReminderEnabled;
+
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'dmReminderEnabled')) {
+    payload.reminderEnabled = sanitized.dmReminderEnabled;
   }
-  if (Object.prototype.hasOwnProperty.call(updates, 'dmReminderDelayMinutes')) {
-    payload.reminderDelayMinutes = updates.dmReminderDelayMinutes;
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'dmReminderDelayMinutes')) {
+    payload.reminderDelayMinutes = sanitized.dmReminderDelayMinutes;
   }
-  if (Object.prototype.hasOwnProperty.call(updates, 'reminderEnabled')) {
-    payload.dmReminderEnabled = updates.reminderEnabled;
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'reminderEnabled')) {
+    payload.dmReminderEnabled = sanitized.reminderEnabled;
   }
-  if (Object.prototype.hasOwnProperty.call(updates, 'reminderDelayMinutes')) {
-    payload.dmReminderDelayMinutes = updates.reminderDelayMinutes;
+  if (Object.prototype.hasOwnProperty.call(sanitized, 'reminderDelayMinutes')) {
+    payload.dmReminderDelayMinutes = sanitized.reminderDelayMinutes;
   }
+
   await collection.updateOne(
     { guildId },
     {
@@ -91,6 +105,7 @@ async function updateGuildConfig(guildId, updates) {
     },
     { upsert: true }
   );
+
   const doc = await collection.findOne({ guildId });
   return mergeConfig(doc, guildId);
 }

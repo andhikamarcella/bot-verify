@@ -2,6 +2,15 @@ const { connectMongo } = require('../lib/db');
 
 const COLLECTION_NAME = 'verificationProfiles';
 
+function resolveIds(data) {
+  const guildID = data.guildId || data.guildID;
+  const userID = data.userId || data.userID;
+  if (!guildID || !userID) {
+    throw new Error('Missing guildId or userId for verification profile operation');
+  }
+  return { guildID, userID };
+}
+
 async function getCollection() {
   const db = await connectMongo();
   return db.collection(COLLECTION_NAME);
@@ -9,16 +18,27 @@ async function getCollection() {
 
 async function getVerificationProfile(userId, guildId) {
   const collection = await getCollection();
-  return collection.findOne({ userId, guildId });
+  if (!userId || !guildId) {
+    return null;
+  }
+  return collection.findOne({
+    $or: [
+      { userId, guildId },
+      { userID: userId, guildID: guildId },
+    ],
+  });
 }
 
 async function upsertVerificationProfile(data) {
   const collection = await getCollection();
-  const filter = { userId: data.userId, guildId: data.guildId };
+  const { guildID, userID } = resolveIds(data);
+  const filter = { guildID, userID };
   const update = {
     $set: {
-      userId: data.userId,
-      guildId: data.guildId,
+      guildID,
+      userID,
+      userId: userID,
+      guildId: guildID,
       accountCreatedAt: data.accountCreatedAt || null,
       isSuspect: Boolean(data.isSuspect),
       suspectReasons: data.suspectReasons || [],
@@ -34,15 +54,20 @@ async function upsertVerificationProfile(data) {
     delete update.$inc;
   }
   await collection.updateOne(filter, update, { upsert: true });
-  return getVerificationProfile(data.userId, data.guildId);
+  return getVerificationProfile(userID, guildID);
 }
 
 async function setRiskScore(userId, guildId, riskScore) {
   const collection = await getCollection();
+  const { guildID, userID } = resolveIds({ guildId, userId });
   await collection.updateOne(
-    { userId, guildId },
+    { guildID, userID },
     {
       $set: {
+        guildID,
+        userID,
+        userId: userID,
+        guildId: guildID,
         riskScore,
         lastUpdatedAt: new Date(),
       },
@@ -53,12 +78,15 @@ async function setRiskScore(userId, guildId, riskScore) {
 
 async function appendSuspectReason(userId, guildId, reason) {
   const collection = await getCollection();
+  const { guildID, userID } = resolveIds({ guildId, userId });
   await collection.updateOne(
-    { userId, guildId },
+    { guildID, userID },
     {
       $setOnInsert: {
-        userId,
-        guildId,
+        guildID,
+        userID,
+        userId: userID,
+        guildId: guildID,
       },
       $addToSet: {
         suspectReasons: reason,

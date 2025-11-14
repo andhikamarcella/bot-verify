@@ -99,6 +99,10 @@ function walkCommands(dirPath) {
     delete require.cache[require.resolve(fullPath)];
     const command = require(fullPath);
     if (command?.data && command?.execute) {
+      if (client.commands.has(command.data.name)) {
+        console.warn(`⚠️  Command ${command.data.name} sudah dimuat, melewati ${fullPath}`);
+        return;
+      }
       client.commands.set(command.data.name, command);
     }
   }
@@ -111,10 +115,16 @@ async function loadCommands() {
 
 async function registerApplicationCommands() {
   const payload = [];
+  const seenNames = new Set();
   for (const command of client.commands.values()) {
-    if (command?.data?.toJSON) {
-      payload.push(command.data.toJSON());
+    if (!command?.data?.toJSON) continue;
+    const name = command.data.name;
+    if (seenNames.has(name)) {
+      console.warn(`⚠️  Duplicate command name detected (${name}), menggunakan definisi pertama.`);
+      continue;
     }
+    seenNames.add(name);
+    payload.push(command.data.toJSON());
   }
 
   if (!process.env.DISCORD_TOKEN || !process.env.DISCORD_CLIENT_ID) {
@@ -130,17 +140,20 @@ async function registerApplicationCommands() {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
   try {
+    const globalRoute = Routes.applicationCommands(process.env.DISCORD_CLIENT_ID);
     const guildRoute = Routes.applicationGuildCommands(
       process.env.DISCORD_CLIENT_ID,
       process.env.GUILD_ID
     );
+    console.log('🧹 Membersihkan command global sebelumnya...');
+    await rest.put(globalRoute, { body: [] });
     console.log(`🧹 Membersihkan command guild sebelumnya untuk ${process.env.GUILD_ID}...`);
     await rest.put(guildRoute, { body: [] });
 
     console.log(`🔁 Mendaftarkan ${payload.length} slash command ke guild ${process.env.GUILD_ID}...`);
     await rest.put(guildRoute, { body: payload });
 
-    const names = payload.map((command) => command.name).join(', ');
+    const names = Array.from(seenNames).join(', ');
     console.log(`✅ Command terpasang: ${names}`);
   } catch (error) {
     console.error('❌ Gagal mendaftarkan command aplikasi', error);
