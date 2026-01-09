@@ -18,6 +18,7 @@ async function createTokenDocument(doc) {
     extraRolesEligible: doc.extraRolesEligible || [],
     createdAt: doc.createdAt || new Date(),
     verifiedAt: doc.verifiedAt || null,
+    boundIp: null, // Initial bound IP is null
   };
   await collection.insertOne(payload);
   return payload;
@@ -50,6 +51,11 @@ async function setTokenStatus(token, status, fields = {}) {
   return findToken(token);
 }
 
+async function bindIpToToken(token, ip) {
+  const collection = await getCollection();
+  await collection.updateOne({ token }, { $set: { boundIp: ip } });
+}
+
 async function listRecentVerified(limit = 50) {
   const collection = await getCollection();
   return collection
@@ -65,4 +71,5 @@ module.exports = {
   findLatestByUser,
   setTokenStatus,
   listRecentVerified,
+  bindIpToToken,
 };
