@@ -9,14 +9,21 @@ interface CaptchaBlockProps {
 
 const FALLBACK_EMOJIS = ['🍉', '🍓', '🍍', '🍇', '🥝'];
 
-export function CaptchaBlock({ onSolved, siteKey = '0x4AAAAAACLgWuYYtcLS0uSY' }: CaptchaBlockProps) {
+export function CaptchaBlock({
+  onSolved,
+  siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY!,
+}: CaptchaBlockProps) {
   const [useFallback, setUseFallback] = useState(false);
-  const [targetEmoji, setTargetEmoji] = useState<string>('🍉');
+  const [targetEmoji, setTargetEmoji] = useState('🍉');
+
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetId = useRef<string | null>(null);
+  const solvedRef = useRef(false); // 🔐 PENTING
 
   useEffect(() => {
-    setTargetEmoji(FALLBACK_EMOJIS[Math.floor(Math.random() * FALLBACK_EMOJIS.length)]);
+    setTargetEmoji(
+      FALLBACK_EMOJIS[Math.floor(Math.random() * FALLBACK_EMOJIS.length)]
+    );
   }, []);
 
   useEffect(() => {
@@ -25,47 +32,64 @@ export function CaptchaBlock({ onSolved, siteKey = '0x4AAAAAACLgWuYYtcLS0uSY' }:
       return;
     }
 
-    // Check if script is already present
-    let script = document.querySelector('script[src^="https://challenges.cloudflare.com/turnstile/v0/api.js"]') as HTMLScriptElement;
-    
+    let script = document.querySelector(
+      'script[src^="https://challenges.cloudflare.com/turnstile/v0/api.js"]'
+    ) as HTMLScriptElement | null;
+
     if (!script) {
-        script = document.createElement('script');
-        script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-        script.async = true;
-        script.defer = true;
-        document.body.appendChild(script);
+      script = document.createElement('script');
+      script.src =
+        'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.async = true;
+      script.defer = true;
+      document.body.appendChild(script);
     }
 
-    const renderTurnstile = () => {
-        if (window.turnstile && containerRef.current && !widgetId.current) {
-             widgetId.current = window.turnstile.render(containerRef.current, {
-                sitekey: siteKey,
-                callback: (token: string) => onSolved({ type: 'turnstile', value: token }),
-                'error-callback': () => {
-                    console.warn('Turnstile error, switching to fallback');
-                    setUseFallback(true);
-                },
-                'expired-callback': () => onSolved({ type: 'turnstile', value: '' }),
-             });
-        }
+    const render = () => {
+      if (
+        window.turnstile &&
+        containerRef.current &&
+        !widgetId.current
+      ) {
+        widgetId.current = window.turnstile.render(containerRef.current, {
+          sitekey: siteKey,
+          callback: (token: string) => {
+            if (solvedRef.current) return; // 🚫 STOP DUPLICATE
+            solvedRef.current = true;
+            onSolved({ type: 'turnstile', value: token });
+          },
+          'expired-callback': () => {
+            if (widgetId.current) {
+              window.turnstile.reset(widgetId.current);
+            }
+          },
+          'error-callback': () => {
+            console.warn('[Turnstile] Error → fallback');
+            setUseFallback(true);
+          },
+        });
+      }
     };
 
     if (window.turnstile) {
-        renderTurnstile();
+      render();
     } else {
-        script.onload = renderTurnstile;
+      script.onload = render;
     }
 
     return () => {
-        if (widgetId.current && window.turnstile) {
-            window.turnstile.remove(widgetId.current);
-            widgetId.current = null;
-        }
+      if (widgetId.current && window.turnstile) {
+        window.turnstile.remove(widgetId.current);
+        widgetId.current = null;
+        solvedRef.current = false;
+      }
     };
   }, [siteKey, onSolved]);
 
+  // 🔁 fallback hanya sekali
   useEffect(() => {
-    if (useFallback) {
+    if (useFallback && !solvedRef.current) {
+      solvedRef.current = true;
       onSolved({ type: 'fallbackEmoji', value: '' });
     }
   }, [useFallback, onSolved]);
@@ -73,7 +97,9 @@ export function CaptchaBlock({ onSolved, siteKey = '0x4AAAAAACLgWuYYtcLS0uSY' }:
   if (useFallback) {
     return (
       <div className="space-y-2">
-        <p className="text-sm text-white/70">Klik emoji {targetEmoji} untuk lanjut.</p>
+        <p className="text-sm text-white/70">
+          Klik emoji {targetEmoji} untuk lanjut.
+        </p>
         <div className="flex flex-wrap gap-3">
           {FALLBACK_EMOJIS.map((emoji) => (
             <button
@@ -96,14 +122,4 @@ export function CaptchaBlock({ onSolved, siteKey = '0x4AAAAAACLgWuYYtcLS0uSY' }:
   }
 
   return <div ref={containerRef} className="min-h-[65px]" />;
-}
-
-declare global {
-    interface Window {
-        turnstile?: {
-            render: (container: HTMLElement, options: any) => string;
-            remove: (widgetId: string) => void;
-            reset: (widgetId: string) => void;
-        }
-    }
 }
