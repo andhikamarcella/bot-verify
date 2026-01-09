@@ -20,6 +20,8 @@ const DEFAULT_CONFIG = {
   panelMessageId: null,
   panelChannelId: null,
   settingsUpdatedAt: null,
+  maintenanceMode: false,
+  maintenanceReason: "System upgrade in progress",
 };
 
 async function getCollection() {
