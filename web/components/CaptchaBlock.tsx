@@ -1,18 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface CaptchaBlockProps {
-  onSolved: (result: { type: 'recaptcha' | 'fallbackEmoji'; value: string }) => void;
+  onSolved: (result: { type: 'turnstile' | 'fallbackEmoji'; value: string }) => void;
   siteKey?: string;
 }
 
 const FALLBACK_EMOJIS = ['🍉', '🍓', '🍍', '🍇', '🥝'];
 
-export function CaptchaBlock({ onSolved, siteKey }: CaptchaBlockProps) {
-  const [recaptchaReady, setRecaptchaReady] = useState(false);
+export function CaptchaBlock({ onSolved, siteKey = '0x4AAAAAACLgWuYYtcLS0uSY' }: CaptchaBlockProps) {
   const [useFallback, setUseFallback] = useState(false);
   const [targetEmoji, setTargetEmoji] = useState<string>('🍉');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const widgetId = useRef<string | null>(null);
 
   useEffect(() => {
     setTargetEmoji(FALLBACK_EMOJIS[Math.floor(Math.random() * FALLBACK_EMOJIS.length)]);
@@ -23,38 +24,51 @@ export function CaptchaBlock({ onSolved, siteKey }: CaptchaBlockProps) {
       setUseFallback(true);
       return;
     }
-    const script = document.createElement('script');
-    script.src = 'https://www.google.com/recaptcha/api.js?render=explicit';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => setRecaptchaReady(true);
-    script.onerror = () => setUseFallback(true);
-    document.body.appendChild(script);
-    return () => {
-      document.body.removeChild(script);
+
+    // Check if script is already present
+    let script = document.querySelector('script[src^="https://challenges.cloudflare.com/turnstile/v0/api.js"]') as HTMLScriptElement;
+    
+    if (!script) {
+        script = document.createElement('script');
+        script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+        script.async = true;
+        script.defer = true;
+        document.body.appendChild(script);
+    }
+
+    const renderTurnstile = () => {
+        if (window.turnstile && containerRef.current && !widgetId.current) {
+             widgetId.current = window.turnstile.render(containerRef.current, {
+                sitekey: siteKey,
+                callback: (token: string) => onSolved({ type: 'turnstile', value: token }),
+                'error-callback': () => {
+                    console.warn('Turnstile error, switching to fallback');
+                    setUseFallback(true);
+                },
+                'expired-callback': () => onSolved({ type: 'turnstile', value: '' }),
+             });
+        }
     };
-  }, [siteKey]);
+
+    if (window.turnstile) {
+        renderTurnstile();
+    } else {
+        script.onload = renderTurnstile;
+    }
+
+    return () => {
+        if (widgetId.current && window.turnstile) {
+            window.turnstile.remove(widgetId.current);
+            widgetId.current = null;
+        }
+    };
+  }, [siteKey, onSolved]);
 
   useEffect(() => {
     if (useFallback) {
       onSolved({ type: 'fallbackEmoji', value: '' });
     }
   }, [useFallback, onSolved]);
-
-  useEffect(() => {
-    if (!recaptchaReady || !siteKey || useFallback) return;
-    if (typeof window === 'undefined' || !(window as any).grecaptcha) return;
-    const widget = (window as any).grecaptcha.render('recaptcha-widget', {
-      sitekey: siteKey,
-      callback: (token: string) => onSolved({ type: 'recaptcha', value: token }),
-      'expired-callback': () => onSolved({ type: 'recaptcha', value: '' }),
-    });
-    return () => {
-      if ((window as any).grecaptcha?.reset) {
-        (window as any).grecaptcha.reset(widget);
-      }
-    };
-  }, [onSolved, recaptchaReady, siteKey, useFallback]);
 
   if (useFallback) {
     return (
@@ -81,5 +95,15 @@ export function CaptchaBlock({ onSolved, siteKey }: CaptchaBlockProps) {
     );
   }
 
-  return <div id="recaptcha-widget" className="min-h-[78px]" />;
+  return <div ref={containerRef} className="min-h-[65px]" />;
+}
+
+declare global {
+    interface Window {
+        turnstile?: {
+            render: (container: HTMLElement, options: any) => string;
+            remove: (widgetId: string) => void;
+            reset: (widgetId: string) => void;
+        }
+    }
 }
