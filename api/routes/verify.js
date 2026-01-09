@@ -2,11 +2,11 @@ const express = require('express');
 const crypto = require('crypto');
 const { Events } = require('discord.js');
 const client = require('../../bot/discordClient');
-const { createTokenDocument, findToken, setTokenStatus } = require('../models/Tokens');
+const { createTokenDocument, findToken, setTokenStatus, bindIpToToken } = require('../models/Tokens');
 const { upsertUserProfile } = require('../models/Users');
 const { insertLog } = require('../models/VerificationLog');
 const { hashIp } = require('../lib/hashIp');
-const { verifyRecaptcha } = require('../lib/recaptcha');
+const { verifyTurnstile } = require('../lib/turnstile');
 const { getExtraRolesForUser } = require('../lib/roleSync');
 const { connectMongo } = require('../lib/db');
 const { getGuildConfig } = require('../models/GuildConfig');
@@ -27,6 +27,7 @@ const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;
 const WELCOME_CHANNEL_ID = process.env.WELCOME_CHANNEL_ID;
 const FRONTEND_URL = process.env.PUBLIC_FRONTEND_URL || '';
 const DISCORD_BROWSER_URL = process.env.DISCORD_BROWSER_URL || null;
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '0x4AAAAAACLgWogcgJIr77XDr6fY5XQR4aQ';
 
 function renderNicknameTemplate(template, context) {
   if (!template) {
@@ -55,6 +56,74 @@ async function ensureReady() {
     await new Promise((resolve) => client.once(Events.ClientReady, resolve));
   }
 }
+
+// Pre-verification Check & Environment Check
+router.get('/pre-check', async (req, res) => {
+  try {
+    const { token } = req.query;
+    const ip = req.ip;
+    const currentIpHash = hashIp(ip);
+
+    await ensureReady();
+
+    // 1. Environment Check
+    const envStatus = {
+      botOnline: client.isReady(),
+      apiLatency: client.ws.ping,
+      guildId: GUILD_ID,
+      maintenanceMode: false,
+    };
+
+    if (token) {
+        const record = await findToken(token);
+        if (!record) {
+            return res.json({ ok: false, error: 'invalid-token', envStatus });
+        }
+        
+        const config = await getGuildConfig(record.guildId);
+        envStatus.maintenanceMode = config.maintenanceMode;
+
+        if (config.maintenanceMode) {
+            return res.json({ 
+                ok: false, 
+                error: 'maintenance-mode', 
+                reason: config.maintenanceReason || 'System maintenance',
+                envStatus 
+            });
+        }
+
+        // Token Expiration Check
+        const createdAt = record.createdAt ? new Date(record.createdAt) : new Date();
+        const diffMinutes = (Date.now() - createdAt.getTime()) / (1000 * 60);
+        if (diffMinutes > 15) {
+             return res.json({ ok: false, error: 'token-expired', envStatus });
+        }
+
+        // One-Time URL Protection (Bind IP)
+        if (record.boundIp && record.boundIp !== currentIpHash) {
+             return res.json({ ok: false, error: 'link-used-on-other-device', envStatus });
+        }
+        
+        if (!record.boundIp) {
+            await bindIpToToken(token, currentIpHash);
+        }
+
+        return res.json({ 
+            ok: true, 
+            tokenValid: true, 
+            expiresIn: Math.max(0, 15 * 60 * 1000 - (Date.now() - createdAt.getTime())),
+            envStatus
+        });
+    }
+
+    return res.json({ ok: true, envStatus });
+
+  } catch (error) {
+    console.error('pre-check error', error);
+    res.status(500).json({ ok: false, error: 'pre-check-failed' });
+  }
+});
+
 
 router.post('/create-token', async (req, res) => {
   try {
@@ -105,6 +174,12 @@ router.post('/verify', async (req, res) => {
     }
 
     const config = await getGuildConfig(record.guildId);
+    
+    // Maintenance Check
+    if (config.maintenanceMode) {
+        return res.status(503).json({ ok: false, error: 'maintenance-mode', reason: config.maintenanceReason });
+    }
+
     const profile = await getVerificationProfile(record.userId, record.guildId);
     const suspectReasons = profile?.suspectReasons || [];
 
@@ -139,10 +214,12 @@ router.post('/verify', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'token-expired' });
     }
 
+    // Turnstile Verification
     let captchaOk = false;
-    if (captchaResult?.type === 'recaptcha') {
-      captchaOk = await verifyRecaptcha(captchaResult.value, process.env.RECAPTCHA_SECRET_KEY);
+    if (captchaResult?.type === 'turnstile') {
+      captchaOk = await verifyTurnstile(captchaResult.value, TURNSTILE_SECRET_KEY, bodyIp || req.ip);
     } else if (captchaResult?.type === 'fallbackEmoji') {
+      // Keep fallback just in case or disable it if strict
       captchaOk = captchaResult.value === 'ok';
     }
 
