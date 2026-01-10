@@ -1,14 +1,12 @@
 const {
   SlashCommandBuilder,
-  PermissionFlagsBits,
   ChannelType,
 } = require('discord.js');
 const { fetchConfig, updateConfig } = require('../utils/guildConfig');
+const { ensureStaff } = require('../utils/permissions');
 
 function ensureAdmin(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    throw new Error('no-permission');
-  }
+  ensureStaff(interaction);
 }
 
 module.exports = {
