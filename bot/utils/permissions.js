@@ -45,9 +45,14 @@ function ensureStaff(interaction) {
 
 function isMemberOrHigher(interaction) {
   if (!interaction?.inGuild?.() || !interaction.member) return false;
+  if (isStaff(interaction)) return true;
   const memberRoleId = process.env.MEMBER_ROLE_ID;
   if (!memberRoleId) return false;
-  return hasAtLeastRole(interaction.member, memberRoleId);
+  const cache = interaction.member?.roles?.cache;
+  if (cache?.has?.(memberRoleId)) return true;
+  const list = interaction.member?.roles;
+  if (Array.isArray(list) && list.includes(memberRoleId)) return true;
+  return false;
 }
 
 function ensureMemberOrHigher(interaction) {
