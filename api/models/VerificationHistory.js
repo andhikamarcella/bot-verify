@@ -30,7 +30,13 @@ async function getHistoryForUser(userId, guildId, limit = 10) {
     .toArray();
 }
 
+async function clearHistoryForUser(userId, guildId) {
+  const collection = await getCollection();
+  await collection.deleteMany({ userId, guildId });
+}
+
 module.exports = {
   insertHistoryEntry,
   getHistoryForUser,
+  clearHistoryForUser,
 };
