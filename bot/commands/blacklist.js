@@ -1,6 +1,5 @@
 const {
   SlashCommandBuilder,
-  PermissionFlagsBits,
   EmbedBuilder,
 } = require('discord.js');
 const {
@@ -10,11 +9,10 @@ const {
 } = require('../../api/models/BlacklistedUsers');
 const { fetchConfig } = require('../utils/guildConfig');
 const { sendVerificationLog } = require('../utils/logging');
+const { ensureStaff } = require('../utils/permissions');
 
 function ensureAdmin(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    throw new Error('no-permission');
-  }
+  ensureStaff(interaction);
 }
 
 module.exports = {
