@@ -216,12 +216,35 @@ router.post('/verify', async (req, res) => {
 
     // Turnstile Verification
     let captchaOk = false;
+    console.log('[Verify] Starting captcha validation', {
+      type: captchaResult?.type,
+      hasValue: !!captchaResult?.value,
+      valueLength: captchaResult?.value?.length,
+      hasSecretKey: !!TURNSTILE_SECRET_KEY,
+      secretKeyLength: TURNSTILE_SECRET_KEY?.length,
+      ip: bodyIp || req.ip
+    });
+
     if (captchaResult?.type === 'turnstile') {
-      captchaOk = await verifyTurnstile(captchaResult.value, TURNSTILE_SECRET_KEY, bodyIp || req.ip);
+      if (!captchaResult.value || captchaResult.value.trim() === '') {
+        console.error('[Verify] Turnstile token is empty');
+        captchaOk = false;
+      } else if (!TURNSTILE_SECRET_KEY || TURNSTILE_SECRET_KEY.trim() === '') {
+        console.error('[Verify] TURNSTILE_SECRET_KEY is not set');
+        captchaOk = false;
+      } else {
+        captchaOk = await verifyTurnstile(captchaResult.value, TURNSTILE_SECRET_KEY, bodyIp || req.ip);
+      }
     } else if (captchaResult?.type === 'fallbackEmoji') {
       // Keep fallback just in case or disable it if strict
       captchaOk = captchaResult.value === 'ok';
+      console.log('[Verify] Using fallback emoji captcha', { ok: captchaOk });
+    } else {
+      console.error('[Verify] Unknown captcha type:', captchaResult?.type);
+      captchaOk = false;
     }
+
+    console.log('[Verify] Captcha validation result:', captchaOk);
 
     if (!captchaOk) {
       await setTokenStatus(token, 'FAILED', { failureReason: 'captcha' });
