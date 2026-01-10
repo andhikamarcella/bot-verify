@@ -2,7 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const { Routes } = require('discord.js');
 
-const RAW_REST_TIMEOUT_MS = Number(process.env.DISCORD_REST_TIMEOUT_MS || 120_000);
+const RAW_REST_TIMEOUT_MS =
+  process.env.DISCORD_REST_TIMEOUT_MS === undefined
+    ? 0
+    : Number(process.env.DISCORD_REST_TIMEOUT_MS);
 const REST_TIMEOUT_MS = Number.isFinite(RAW_REST_TIMEOUT_MS) && RAW_REST_TIMEOUT_MS > 0 ? RAW_REST_TIMEOUT_MS : null;
 
 function sleep(ms) {
