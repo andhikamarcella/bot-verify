@@ -98,14 +98,20 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
             };
             document.body.appendChild(script);
         } else {
-            // Script exists, wait for it to load
-            if (script.readyState === 'complete' || script.readyState === 'loaded') {
+            // Script exists, check if it's already loaded or wait for it
+            if (window.turnstile) {
+                // Already loaded
                 scriptLoaded = true;
                 renderTurnstile();
             } else {
+                // Wait for script to load
                 script.onload = () => {
                     scriptLoaded = true;
                     renderTurnstile();
+                };
+                script.onerror = () => {
+                    console.error('[Turnstile] Failed to load existing script');
+                    setUseFallback(true);
                 };
             }
         }
