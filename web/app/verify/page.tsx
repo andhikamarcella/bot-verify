@@ -52,13 +52,20 @@ export default function VerifyPage() {
 
   // Memoize callback untuk mencegah re-render
   const handleCaptchaSolved = useCallback((res: { type: "turnstile" | "fallbackEmoji"; value: string }) => {
-    if (!res.value) return;
+    console.log('[Captcha] handleCaptchaSolved called', { type: res.type, hasValue: !!res.value });
+    
+    if (!res.value) {
+      console.warn('[Captcha] No value in result, ignoring');
+      return;
+    }
 
     if (res.type === "fallbackEmoji" && res.value !== "ok") {
+      console.warn('[Captcha] Fallback emoji failed');
       setStatusMsg(t.verifyFailed);
       return;
     }
 
+    console.log('[Captcha] Setting captcha result');
     setCaptchaResult(res);
   }, [t.verifyFailed]);
 
@@ -134,7 +141,22 @@ export default function VerifyPage() {
   };
 
   async function handleVerify() {
-  if (!token || !captchaResult) return;
+  if (!token || !captchaResult) {
+    console.warn('[Verify] Missing token or captchaResult', { token: !!token, captchaResult: !!captchaResult });
+    return;
+  }
+
+  if (!captchaResult.value || captchaResult.value.trim() === '') {
+    console.warn('[Verify] Captcha result value is empty', captchaResult);
+    setStatusMsg(t.captchaMissing);
+    return;
+  }
+
+  console.log('[Verify] Starting verification', { 
+    token: token.substring(0, 10) + '...', 
+    captchaType: captchaResult.type,
+    hasValue: !!captchaResult.value 
+  });
 
   setStep(2);
   setStatusMsg(t.verifying);
@@ -157,11 +179,15 @@ export default function VerifyPage() {
 
     const data: VerifyResponse = await res.json();
 
+    console.log('[Verify] Response received', { ok: data.ok, error: data.error });
+
     if (data.ok) {
       setStep(3);
       setStatusMsg(t.successMessage);
     } else {
       setStep(1);
+      // Reset captcha result untuk allow retry
+      setCaptchaResult(null);
       setStatusMsg(
         data.error === "maintenance-mode"
           ? `${t.envCheck.maintenance}: ${data.reason}`
@@ -169,8 +195,9 @@ export default function VerifyPage() {
       );
     }
   } catch (err) {
-    console.error(err);
+    console.error('[Verify] Error:', err);
     setStep(1);
+    setCaptchaResult(null);
     setStatusMsg(t.errors.apiTimeout);
   }
 }
@@ -326,23 +353,27 @@ export default function VerifyPage() {
 
                     <div className="flex justify-center p-4 bg-slate-800/30 rounded-2xl border border-slate-700/50">
                         <CaptchaBlock 
+                            key={step} // Force re-render when step changes
                             siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ''}
                             fallbackText={t.captchaFallback}
                             onSolved={handleCaptchaSolved}
                         />
                     </div>
 
-                    {captchaResult && (
+                    {captchaResult && captchaResult.value && (
                          <button
   onClick={() => handleVerify()}
-  disabled={!captchaResult}
+  disabled={!captchaResult || !captchaResult.value}
   className="w-full py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
 >
   {t.button}
 </button>
                     )}
                     
-                    <button onClick={() => setStep(0)} className="w-full text-xs text-slate-500 hover:text-slate-300 transition">
+                    <button onClick={() => {
+                        setStep(0);
+                        setCaptchaResult(null); // Reset captcha when going back
+                    }} className="w-full text-xs text-slate-500 hover:text-slate-300 transition">
                         {t.back}
                     </button>
                 </div>
