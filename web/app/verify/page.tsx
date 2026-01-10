@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, FormEvent, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, useEffect, useMemo, useState, useCallback } from "react";
 import { useLocaleCopy } from "../../lib/useLocale";
 import { CaptchaBlock } from "../../components/CaptchaBlock";
 import { PolicyModal } from "../../components/PolicyModal";
@@ -49,6 +49,18 @@ export default function VerifyPage() {
   const [agreedPrivacy, setAgreedPrivacy] = useState(false);
   
   const [captchaResult, setCaptchaResult] = useState<{ type: "turnstile" | "fallbackEmoji"; value: string } | null>(null);
+
+  // Memoize callback untuk mencegah re-render
+  const handleCaptchaSolved = useCallback((res: { type: "turnstile" | "fallbackEmoji"; value: string }) => {
+    if (!res.value) return;
+
+    if (res.type === "fallbackEmoji" && res.value !== "ok") {
+      setStatusMsg(t.verifyFailed);
+      return;
+    }
+
+    setCaptchaResult(res);
+  }, [t.verifyFailed]);
 
   // Initial Load & Pre-check
   useEffect(() => {
@@ -316,16 +328,7 @@ export default function VerifyPage() {
                         <CaptchaBlock 
                             siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ''}
                             fallbackText={t.captchaFallback}
-                            onSolved={(res) => {
-  if (!res.value) return;
-
-  if (res.type === "fallbackEmoji" && res.value !== "ok") {
-    setStatusMsg(t.verifyFailed);
-    return;
-  }
-
-  setCaptchaResult(res);
-}}
+                            onSolved={handleCaptchaSolved}
                         />
                     </div>
 
