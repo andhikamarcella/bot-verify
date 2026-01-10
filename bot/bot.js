@@ -593,7 +593,16 @@ client.on(Events.MessageCreate, (message) => {
 
 async function startBot() {
   await loadCommands();
-  await registerApplicationCommands();
+
+  const blocking = process.env.COMMAND_REGISTRATION_BLOCKING === 'true';
+  if (blocking) {
+    await registerApplicationCommands();
+  } else {
+    registerApplicationCommands().catch((err) => {
+      console.error('❌ Registrasi command gagal (async)', err);
+    });
+  }
+
   await client.login(process.env.DISCORD_TOKEN);
   return client;
 }
