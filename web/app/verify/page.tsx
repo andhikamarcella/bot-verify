@@ -234,7 +234,15 @@ export default function VerifyPage() {
         if (data.error === "maintenance-mode") {
           errorMessage = `${t.envCheck.maintenance}: ${data.reason || ''}`;
         } else if (data.error === "captcha-invalid") {
-          errorMessage = t.verifyFailed + " (Captcha tidak valid. Silakan coba lagi.)";
+          // Show more specific error message
+          const reason = data.reason || '';
+          if (reason.includes('Secret key')) {
+            errorMessage = t.verifyFailed + " (Konfigurasi server error. Hubungi admin.)";
+          } else if (reason.includes('Token')) {
+            errorMessage = t.verifyFailed + " (Token expired. Silakan refresh halaman dan coba lagi.)";
+          } else {
+            errorMessage = t.verifyFailed + " (Captcha tidak valid. Silakan refresh halaman dan coba lagi.)";
+          }
         } else if (data.error === "token-expired") {
           errorMessage = t.tokenExpired;
         } else if (data.error === "invalid-token") {
@@ -244,6 +252,7 @@ export default function VerifyPage() {
         }
       }
       
+      console.error('[Verify] Error details:', { error: data.error, reason: data.reason });
       setStatusMsg(errorMessage);
     }
   } catch (err) {
