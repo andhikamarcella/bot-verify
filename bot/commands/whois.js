@@ -5,6 +5,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('whois')
     .setDescription('Lihat status verifikasi seorang member')
+    .setDMPermission(false)
     .addUserOption((option) =>
       option.setName('target').setDescription('Member yang ingin dicek').setRequired(true)
     ),
@@ -16,8 +17,11 @@ module.exports = {
       const db = await connectMongo();
       const profile = await db.collection('users').findOne({
         userId: target.id,
-        guildId: process.env.GUILD_ID,
+        guildId: interaction.guildId,
       });
+
+      const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+      const nickname = member?.displayName || null;
 
       const badgeEmoji = profile?.badgeEmoji || '❌';
       const badgeName = profile?.badgeName || 'Not Verified';
@@ -29,10 +33,11 @@ module.exports = {
       const color = profile?.accentColor || 0x5865f2;
 
       const embed = new EmbedBuilder()
-        .setTitle(`${target.username}'s Verification Info`)
+        .setTitle(`${target.username}'s Verification Info${nickname ? ` (${nickname})` : ''}`)
         .setThumbnail(thumbnailUrl)
         .setColor(color)
         .addFields(
+          ...(nickname ? [{ name: 'Nickname', value: nickname, inline: true }] : []),
           { name: 'Badge', value: `${badgeEmoji} ${badgeName}`, inline: true },
           { name: 'Verified At', value: verifiedAtText, inline: true },
           { name: 'Suspicious?', value: suspiciousText, inline: true }
