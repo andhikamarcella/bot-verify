@@ -7,6 +7,7 @@ const {
   ButtonStyle,
   ActivityType,
   REST,
+  PermissionFlagsBits,
 } = require('discord.js');
 const client = require('./discordClient');
 const {
@@ -49,6 +50,8 @@ const recentlyVerified = new Map();
 const reminderTimers = new Map();
 const verifiedCache = new Map();
 const mediaWarningCooldown = new Map();
+const blacklistCache = new Map();
+const blacklistEnforcementCooldown = new Map();
 
 const presenceMessages = [
   'Verifying members | /verify',
@@ -254,6 +257,39 @@ async function isUserVerified(guildId, userId) {
   return verified;
 }
 
+async function getCachedBlacklistEntry(guildId, userId) {
+  const cached = blacklistCache.get(userId);
+  if (cached && cached.expires > Date.now()) {
+    return cached.entry;
+  }
+  const entry = await getBlacklistEntry(userId, guildId).catch(() => null);
+  blacklistCache.set(userId, { entry, expires: Date.now() + 60 * 1000 });
+  return entry;
+}
+
+async function enforceBlacklistOnMember({ guild, member, reason }) {
+  const memberRoleId = process.env.MEMBER_ROLE_ID;
+  const blacklistRoleId = process.env.BLACKLIST_ROLE_ID;
+  const timeoutMinutes = Number(process.env.BLACKLIST_TIMEOUT_MINUTES || 0);
+
+  const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
+  const canManageRoles = Boolean(me?.permissions?.has?.(PermissionFlagsBits.ManageRoles));
+  const canTimeout = Boolean(me?.permissions?.has?.(PermissionFlagsBits.ModerateMembers));
+
+  if (canManageRoles && memberRoleId && member.roles.cache.has(memberRoleId)) {
+    await member.roles.remove(memberRoleId, 'blacklisted').catch(() => {});
+  }
+
+  if (canManageRoles && blacklistRoleId && !member.roles.cache.has(blacklistRoleId)) {
+    await member.roles.add(blacklistRoleId, 'blacklisted').catch(() => {});
+  }
+
+  if (canTimeout && timeoutMinutes > 0) {
+    const ms = Math.min(timeoutMinutes, 60 * 24 * 28) * 60 * 1000;
+    await member.timeout(ms, reason || 'blacklisted').catch(() => {});
+  }
+}
+
 async function scheduleReminder(member) {
   const config = await fetchConfig(member.guild.id);
   const reminderEnabled =
@@ -414,6 +450,34 @@ async function handleMemberJoin(member) {
 async function handleMessageCreate(message) {
   if (!message.guild || message.guild.id !== GUILD_ID) return;
   if (message.author.bot) return;
+
+  const blacklistEnabled = (process.env.BLACKLIST_ENFORCE_DELETE || 'true').toLowerCase() !== 'false';
+  if (blacklistEnabled) {
+    const entry = await getCachedBlacklistEntry(message.guild.id, message.author.id);
+    if (entry) {
+      const me = message.guild.members.me || (await message.guild.members.fetchMe().catch(() => null));
+      if (me?.permissions?.has?.(PermissionFlagsBits.ManageMessages)) {
+        await message.delete().catch(() => {});
+      }
+
+      const cooldownMs = Math.max(5_000, Number(process.env.BLACKLIST_ENFORCE_COOLDOWN_MS || 15_000));
+      const key = `${message.guild.id}:${message.author.id}`;
+      const now = Date.now();
+      const next = blacklistEnforcementCooldown.get(key) || 0;
+      if (next <= now) {
+        blacklistEnforcementCooldown.set(key, now + cooldownMs);
+        const member = message.member || (await message.guild.members.fetch(message.author.id).catch(() => null));
+        if (member) {
+          await enforceBlacklistOnMember({
+            guild: message.guild,
+            member,
+            reason: `blacklisted:${entry.reason || 'unspecified'}`,
+          });
+        }
+      }
+      return;
+    }
+  }
 
   const config = await fetchConfig(message.guild.id);
 
