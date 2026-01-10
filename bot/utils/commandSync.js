@@ -2,9 +2,17 @@ const fs = require('fs');
 const path = require('path');
 const { Routes } = require('discord.js');
 
-const REST_TIMEOUT_MS = Number(process.env.DISCORD_REST_TIMEOUT_MS || 120_000);
+const RAW_REST_TIMEOUT_MS = Number(process.env.DISCORD_REST_TIMEOUT_MS || 120_000);
+const REST_TIMEOUT_MS = Number.isFinite(RAW_REST_TIMEOUT_MS) && RAW_REST_TIMEOUT_MS > 0 ? RAW_REST_TIMEOUT_MS : null;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function withTimeout(promise, label) {
+  if (!REST_TIMEOUT_MS) {
+    return promise;
+  }
   let timer = null;
   const timeoutPromise = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`timeout:${label}`)), REST_TIMEOUT_MS);
@@ -185,6 +193,53 @@ async function removeDuplicateGuildCommands(rest, clientId, guildId) {
   );
 }
 
+async function syncGuildCommandsIndividually(rest, clientId, guildId, payload) {
+  const guildRoute = Routes.applicationGuildCommands(clientId, guildId);
+  const existing = await restCall(rest, 'get', guildRoute, undefined, `Ambil command guild ${guildId}`);
+  const existingByName = new Map();
+  if (Array.isArray(existing)) {
+    for (const cmd of existing) {
+      if (cmd?.name) {
+        existingByName.set(cmd.name, cmd);
+      }
+    }
+  }
+
+  const desiredNames = new Set(payload.map((cmd) => cmd.name));
+
+  for (const cmd of payload) {
+    const found = existingByName.get(cmd.name);
+    if (found?.id) {
+      await restCall(
+        rest,
+        'patch',
+        Routes.applicationGuildCommand(clientId, guildId, found.id),
+        { body: cmd },
+        `Update command guild ${cmd.name}`
+      );
+    } else {
+      await restCall(rest, 'post', guildRoute, { body: cmd }, `Buat command guild ${cmd.name}`);
+    }
+    await sleep(250);
+  }
+
+  if (Array.isArray(existing)) {
+    for (const cmd of existing) {
+      if (!cmd?.id || !cmd?.name) continue;
+      if (!desiredNames.has(cmd.name)) {
+        await restCall(
+          rest,
+          'delete',
+          Routes.applicationGuildCommand(clientId, guildId, cmd.id),
+          undefined,
+          `Hapus command guild ${cmd.name}`
+        );
+        await sleep(250);
+      }
+    }
+  }
+}
+
 async function syncGuildCommands(rest, clientId, guildId, manifest) {
   if (!Array.isArray(manifest) || manifest.length === 0) {
     return [];
@@ -221,7 +276,21 @@ async function syncGuildCommands(rest, clientId, guildId, manifest) {
   console.log(
     `🧾 Menyiapkan ${payload.length} command untuk guild ${guildId} (~${Math.round(payloadBytes / 1024)}KB)...`
   );
-  await restCall(rest, 'put', guildRoute, { body: payload }, `Pasang command guild ${guildId}`);
+
+  const modeRaw = String(process.env.COMMAND_SYNC_MODE || 'auto').toLowerCase();
+  const mode = modeRaw === 'bulk' || modeRaw === 'individual' ? modeRaw : 'auto';
+
+  if (mode === 'individual') {
+    await syncGuildCommandsIndividually(rest, clientId, guildId, payload);
+  } else {
+    try {
+      await restCall(rest, 'put', guildRoute, { body: payload }, `Pasang command guild ${guildId}`);
+    } catch (error) {
+      console.warn(`⚠️  Bulk overwrite gagal, mencoba mode individual...`);
+      await syncGuildCommandsIndividually(rest, clientId, guildId, payload);
+    }
+  }
+
   await removeDuplicateGuildCommands(rest, clientId, guildId);
   return payload.map((item) => item.name);
 }
