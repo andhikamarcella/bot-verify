@@ -48,7 +48,7 @@ export default function VerifyPage() {
   const [agreedTerms, setAgreedTerms] = useState(false);
   const [agreedPrivacy, setAgreedPrivacy] = useState(false);
   
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaResult, setCaptchaResult] = useState<{ type: "turnstile" | "fallbackEmoji"; value: string } | null>(null);
 
   // Initial Load & Pre-check
   useEffect(() => {
@@ -121,15 +121,16 @@ export default function VerifyPage() {
       return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  async function handleVerify() {
-    if (!token || !captchaToken) return;
+  async function handleVerify(nextCaptchaResult?: { type: "turnstile" | "fallbackEmoji"; value: string }) {
+    const effectiveCaptcha = nextCaptchaResult || captchaResult;
+    if (!token || !effectiveCaptcha) return;
     
     setStep(2); // Processing
     setStatusMsg(t.verifying);
 
     const body = {
       token,
-      captchaResult: { type: "turnstile", value: captchaToken },
+      captchaResult: effectiveCaptcha,
       ip: "0.0.0.0", // Server will detect actual IP
     };
 
@@ -182,7 +183,7 @@ export default function VerifyPage() {
               <div className="max-w-md w-full bg-slate-900 border border-amber-500/30 p-8 rounded-2xl text-center shadow-2xl">
                   <ExclamationTriangleIcon className="h-16 w-16 text-amber-500 mx-auto mb-4" />
                   <h1 className="text-2xl font-bold mb-2">{t.envCheck.maintenance}</h1>
-                  <p className="text-slate-400 mb-6">{envStatus.maintenanceReason || 'Maintenance in progress'}</p>
+                  <p className="text-slate-400 mb-6">{envStatus.maintenanceReason || t.envCheck.maintenance}</p>
               </div>
           </div>
       );
@@ -194,7 +195,7 @@ export default function VerifyPage() {
         <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
              <div className="max-w-md w-full bg-slate-900 border border-red-500/30 p-8 rounded-2xl text-center shadow-2xl">
                  <ExclamationTriangleIcon className="h-16 w-16 text-red-500 mx-auto mb-4" />
-                 <h1 className="text-2xl font-bold mb-2">Access Denied</h1>
+                 <h1 className="text-2xl font-bold mb-2">{t.accessDenied}</h1>
                  <p className="text-slate-400 mb-6">{statusMsg || t.tokenMissing}</p>
                  {timeLeft === 0 && <div className="text-red-400 font-mono text-xl">{t.tokenExpired}</div>}
              </div>
@@ -275,7 +276,7 @@ export default function VerifyPage() {
                                 {agreedTerms && <CheckCircleIcon className="w-4 h-4 text-slate-900" />}
                             </div>
                             <div className="text-sm text-slate-300 select-none" onClick={() => !agreedTerms && setTermsOpen(true)}>
-                                {t.termsCheckbox} <span className="text-cyan-400 underline" onClick={(e) => { e.stopPropagation(); setTermsOpen(true); }}>Docs</span>
+                                {t.termsCheckbox} <span className="text-cyan-400 underline" onClick={(e) => { e.stopPropagation(); setTermsOpen(true); }}>{t.docs}</span>
                             </div>
                         </label>
 
@@ -284,7 +285,7 @@ export default function VerifyPage() {
                                 {agreedPrivacy && <CheckCircleIcon className="w-4 h-4 text-slate-900" />}
                             </div>
                             <div className="text-sm text-slate-300 select-none" onClick={() => !agreedPrivacy && setPrivacyOpen(true)}>
-                                {t.privacyCheckbox} <span className="text-cyan-400 underline" onClick={(e) => { e.stopPropagation(); setPrivacyOpen(true); }}>Docs</span>
+                                {t.privacyCheckbox} <span className="text-cyan-400 underline" onClick={(e) => { e.stopPropagation(); setPrivacyOpen(true); }}>{t.docs}</span>
                             </div>
                         </label>
                     </div>
@@ -311,17 +312,22 @@ export default function VerifyPage() {
                     </div>
 
                     <div className="flex justify-center p-4 bg-slate-800/30 rounded-2xl border border-slate-700/50">
-                        <CaptchaBlock onSolved={(res) => {
-                            if (res.value) {
-                                setCaptchaToken(res.value);
-                                handleVerify(); // Auto submit? No, wait, user might want to click. But user asked for auto retry/smooth UX. Let's auto trigger handleVerify after state update.
-                                // Actually handleVerify needs to be called.
-                                // React state update is async, so better to call a function that calls verify with the token.
-                            }
-                        }} />
+                        <CaptchaBlock 
+                            siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ''}
+                            fallbackText={t.captchaFallback}
+                            onSolved={(res) => {
+                                if (!res.value) return;
+                                if (res.type === 'fallbackEmoji' && res.value !== 'ok') {
+                                  setStatusMsg(t.verifyFailed);
+                                  return;
+                                }
+                                setCaptchaResult(res);
+                                handleVerify(res);
+                            }} 
+                        />
                     </div>
 
-                    {captchaToken && (
+                    {captchaResult && (
                          <button 
                             onClick={handleVerify}
                             className="w-full py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/20 hover:scale-[1.02] active:scale-95 transition-all"
@@ -331,7 +337,7 @@ export default function VerifyPage() {
                     )}
                     
                     <button onClick={() => setStep(0)} className="w-full text-xs text-slate-500 hover:text-slate-300 transition">
-                        Back
+                        {t.back}
                     </button>
                 </div>
             )}
@@ -354,11 +360,11 @@ export default function VerifyPage() {
                      <div className="w-24 h-24 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-6 ring-4 ring-green-500/20">
                          <CheckCircleIcon className="w-12 h-12 text-green-500" />
                      </div>
-                     <h2 className="text-2xl font-bold text-white mb-2">Verified!</h2>
+                     <h2 className="text-2xl font-bold text-white mb-2">{t.verified}</h2>
                      <p className="text-slate-300 mb-8">{t.successMessage}</p>
                      
                      <a href="discord://" className="inline-block w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-medium transition border border-slate-700">
-                         Open Discord
+                         {t.openDiscord}
                      </a>
                  </div>
             )}
@@ -394,11 +400,9 @@ export default function VerifyPage() {
                 <p><strong>3. Bot Usage</strong><br/>Our verification bot collects your Discord ID and IP address (hashed) for security purposes.</p>
                 <p><strong>4. Termination</strong><br/>Admins reserve the right to revoke your verified status at any time.</p>
                 <p><strong>5. Liability</strong><br/>We are not responsible for any issues arising from Discord API downtimes.</p>
-                <div className="h-32 bg-slate-800/50 rounded-lg flex items-center justify-center text-slate-600 text-xs">
-                    (Scroll down to read more...)
-                </div>
                 <p><strong>6. Updates</strong><br/>These terms may change at any time.</p>
                 <p><strong>7. Final Agreement</strong><br/>By clicking "I Understand", you confirm you are human and eligible to join.</p>
+                <div className="h-32"></div>
             </div>
         } 
       />
@@ -417,11 +421,9 @@ export default function VerifyPage() {
                 <p><strong>3. Data Retention</strong><br/>Verification logs are stored for 30 days and then anonymized.</p>
                 <p><strong>4. Third Parties</strong><br/>We use Cloudflare Turnstile for CAPTCHA, which may collect device info.</p>
                 <p><strong>5. Your Rights</strong><br/>You can request data deletion by contacting the server owner.</p>
-                <div className="h-32 bg-slate-800/50 rounded-lg flex items-center justify-center text-slate-600 text-xs">
-                    (Scroll down to read more...)
-                </div>
                 <p><strong>6. Cookies</strong><br/>We use local storage to save your language preference.</p>
                 <p><strong>7. Contact</strong><br/>For privacy concerns, reach out to staff.</p>
+                <div className="h-32"></div>
             </div>
         } 
       />
