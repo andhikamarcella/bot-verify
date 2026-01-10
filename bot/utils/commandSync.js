@@ -15,6 +15,19 @@ const RAW_COMMAND_SYNC_DELAY_MS =
 const COMMAND_SYNC_DELAY_MS =
   Number.isFinite(RAW_COMMAND_SYNC_DELAY_MS) && RAW_COMMAND_SYNC_DELAY_MS >= 0 ? RAW_COMMAND_SYNC_DELAY_MS : 1250;
 
+const RAW_REST_HARD_TIMEOUT_MS =
+  process.env.DISCORD_REST_HARD_TIMEOUT_MS === undefined
+    ? 300000
+    : Number(process.env.DISCORD_REST_HARD_TIMEOUT_MS);
+const REST_HARD_TIMEOUT_MS =
+  Number.isFinite(RAW_REST_HARD_TIMEOUT_MS) && RAW_REST_HARD_TIMEOUT_MS > 0 ? RAW_REST_HARD_TIMEOUT_MS : null;
+
+const RAW_REST_RETRIES =
+  process.env.DISCORD_REST_RETRIES === undefined
+    ? 2
+    : Number(process.env.DISCORD_REST_RETRIES);
+const REST_RETRIES = Number.isFinite(RAW_REST_RETRIES) && RAW_REST_RETRIES >= 0 ? RAW_REST_RETRIES : 2;
+
 const rateLimitLoggerAttached = new WeakSet();
 
 function attachRateLimitLogger(rest) {
@@ -61,6 +74,21 @@ function withTimeout(promise, label) {
   });
 }
 
+function withHardTimeout(promise, label) {
+  if (!REST_HARD_TIMEOUT_MS) {
+    return promise;
+  }
+  let timer = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout-hard:${label}`)), REST_HARD_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  });
+}
+
 function shouldBypassTimeout(label, route) {
   const normalizedLabel = String(label || '').toLowerCase();
   if (normalizedLabel.includes('command guild')) {
@@ -71,34 +99,51 @@ function shouldBypassTimeout(label, route) {
 }
 
 async function restCall(rest, method, route, options, label) {
-  const startedAt = Date.now();
   attachRateLimitLogger(rest);
+
   const heartbeatRaw =
     process.env.DISCORD_REST_HEARTBEAT_MS === undefined
       ? 15000
       : Number(process.env.DISCORD_REST_HEARTBEAT_MS);
   const heartbeatMs = Number.isFinite(heartbeatRaw) && heartbeatRaw > 0 ? heartbeatRaw : null;
-  let heartbeatTimer = null;
-  try {
-    console.log(`➡️  ${label}... [${String(method || '').toUpperCase()} ${route}]`);
-    if (heartbeatMs) {
-      heartbeatTimer = setInterval(() => {
-        const elapsed = Date.now() - startedAt;
-        console.log(`⏳ ${label} masih berjalan... (${elapsed}ms)`);
-      }, heartbeatMs);
-    }
-    const callPromise = rest[method](route, options);
-    const result = await (shouldBypassTimeout(label, route) ? callPromise : withTimeout(callPromise, label));
-    const elapsed = Date.now() - startedAt;
-    console.log(`✅ ${label} (${elapsed}ms)`);
-    return result;
-  } catch (error) {
-    const elapsed = Date.now() - startedAt;
-    console.warn(`❌ ${label} gagal (${elapsed}ms): ${error?.message || error}`);
-    throw error;
-  } finally {
-    if (heartbeatTimer) {
-      clearInterval(heartbeatTimer);
+
+  const isGuildCommandOp = shouldBypassTimeout(label, route);
+  const maxAttempts = isGuildCommandOp ? Math.max(1, REST_RETRIES + 1) : 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const attemptLabel = attempt > 1 ? `${label} (attempt ${attempt}/${maxAttempts})` : label;
+    const startedAt = Date.now();
+    let heartbeatTimer = null;
+    try {
+      console.log(`➡️  ${attemptLabel}... [${String(method || '').toUpperCase()} ${route}]`);
+      if (heartbeatMs) {
+        heartbeatTimer = setInterval(() => {
+          const elapsed = Date.now() - startedAt;
+          console.log(`⏳ ${attemptLabel} masih berjalan... (${elapsed}ms)`);
+        }, heartbeatMs);
+      }
+
+      const callPromise = rest[method](route, options);
+      const guarded = isGuildCommandOp ? withHardTimeout(callPromise, attemptLabel) : withTimeout(callPromise, attemptLabel);
+      const result = await guarded;
+
+      const elapsed = Date.now() - startedAt;
+      console.log(`✅ ${attemptLabel} (${elapsed}ms)`);
+      return result;
+    } catch (error) {
+      const elapsed = Date.now() - startedAt;
+      console.warn(`❌ ${attemptLabel} gagal (${elapsed}ms): ${error?.message || error}`);
+      if (attempt < maxAttempts) {
+        const backoffMs = Math.min(15000, 2000 * attempt);
+        console.warn(`🔁 Retry dalam ${backoffMs}ms...`);
+        await sleep(backoffMs);
+        continue;
+      }
+      throw error;
+    } finally {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+      }
     }
   }
 }
