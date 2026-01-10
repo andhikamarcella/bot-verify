@@ -208,7 +208,10 @@ async function syncGuildCommands(rest, clientId, guildId, manifest) {
   const payload = [];
   const seen = new Set();
   for (const entry of manifest) {
-    if (!entry?.json?.nanme) continue;
+    if (!entry?.json?.name) {
+      console.warn(`⚠️  Mengabaikan command tanpa nama dari manifest:`, entry?.json);
+      continue;
+    }
     if (seen.has(entry.json.name)) continue;
     if (onlyNames.size > 0 && !onlyNames.has(entry.json.name)) continue;
     seen.add(entry.json.name);
