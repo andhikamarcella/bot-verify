@@ -13,6 +13,7 @@ export type CopyShape = {
   successMessage: string;
   verifyFailed: string;
   captchaMissing: string;
+  captchaFallback: string;
   footer: string;
   
   // New Additions
@@ -25,6 +26,7 @@ export type CopyShape = {
   privacyTitle: string;
   termsCheckbox: string;
   privacyCheckbox: string;
+  docs: string;
   readToEnd: string;
   agreeBtn: string;
   
@@ -50,6 +52,11 @@ export type CopyShape = {
   estimatedTime: string;
   antiScam: string;
   
+  accessDenied: string;
+  verified: string;
+  openDiscord: string;
+  back: string;
+  
   faq: {
     title: string;
     q1: string;
@@ -67,6 +74,7 @@ const COPY: Record<LocaleKey, CopyShape> = {
     successMessage: '✅ Verification successful! You are now a Member.',
     verifyFailed: 'Verification failed. Please try again.',
     captchaMissing: 'Please complete the security check.',
+    captchaFallback: 'Click the emoji {emoji} to continue.',
     footer: 'Need help? Use /help in the server.',
     
     step0: 'Agreement',
@@ -78,6 +86,7 @@ const COPY: Record<LocaleKey, CopyShape> = {
     privacyTitle: 'Privacy Policy',
     termsCheckbox: 'I have read and agree to the Terms of Service',
     privacyCheckbox: 'I agree to the Privacy Policy',
+    docs: 'Docs',
     readToEnd: 'Please scroll to the end to agree',
     agreeBtn: 'I Understand',
     
@@ -103,6 +112,11 @@ const COPY: Record<LocaleKey, CopyShape> = {
     estimatedTime: '⏱️ Takes about 10-20 seconds',
     antiScam: '⚠️ Admins will never ask for your password or token.',
     
+    accessDenied: 'Access Denied',
+    verified: 'Verified!',
+    openDiscord: 'Open Discord',
+    back: 'Back',
+    
     faq: {
       title: 'Common Issues',
       q1: 'Why do I need to verify?',
@@ -117,7 +131,8 @@ const COPY: Record<LocaleKey, CopyShape> = {
     verifying: 'Memproses verifikasi...',
     successMessage: '✅ Verifikasi berhasil! Kamu sudah menjadi Member.',
     verifyFailed: 'Verifikasi gagal. Silakan coba lagi.',
-    captchaMissing: 'Mohon selesaikan pemeriksaan keamanan.',
+    captchaMissing: 'Silakan selesaikan pemeriksaan keamanan.',
+    captchaFallback: 'Klik emoji {emoji} untuk lanjut.',
     footer: 'Butuh bantuan? Gunakan /help di server.',
     
     step0: 'Persetujuan',
@@ -129,6 +144,7 @@ const COPY: Record<LocaleKey, CopyShape> = {
     privacyTitle: 'Kebijakan Privasi',
     termsCheckbox: 'Saya telah membaca dan menyetujui Syarat & Ketentuan',
     privacyCheckbox: 'Saya setuju dengan Kebijakan Privasi',
+    docs: 'Dokumen',
     readToEnd: 'Scroll sampai bawah untuk menyetujui',
     agreeBtn: 'Saya Mengerti',
     
@@ -153,6 +169,11 @@ const COPY: Record<LocaleKey, CopyShape> = {
     rolePreview: 'Kamu akan mendapatkan role Member',
     estimatedTime: '⏱️ Proses ±10-20 detik',
     antiScam: '⚠️ Admin tidak pernah meminta password/token kamu.',
+    
+    accessDenied: 'Akses Ditolak',
+    verified: 'Terverifikasi!',
+    openDiscord: 'Buka Discord',
+    back: 'Kembali',
     
     faq: {
       title: 'Masalah Umum',
