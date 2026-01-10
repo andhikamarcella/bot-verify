@@ -128,6 +128,10 @@ async function loadCommands() {
 }
 
 async function registerApplicationCommands() {
+  if (process.env.SKIP_COMMAND_REGISTRATION === 'true') {
+    console.warn('⚠️  Lewati registrasi command: SKIP_COMMAND_REGISTRATION=true');
+    return;
+  }
   if (!process.env.DISCORD_TOKEN || !process.env.DISCORD_CLIENT_ID) {
     console.warn('⚠️  Lewati registrasi command: DISCORD_TOKEN atau DISCORD_CLIENT_ID tidak tersedia.');
     return;
