@@ -52,9 +52,13 @@ export default function VerifyPage() {
 
   // Memoize callback untuk mencegah re-render
   const handleCaptchaSolved = useCallback((res: { type: "turnstile" | "fallbackEmoji"; value: string }) => {
-    console.log('[Captcha] handleCaptchaSolved called', { type: res.type, hasValue: !!res.value });
+    console.log('[Captcha] handleCaptchaSolved called', { 
+      type: res.type, 
+      hasValue: !!res.value,
+      valueLength: res.value?.length 
+    });
     
-    if (!res.value) {
+    if (!res.value || res.value.trim() === '') {
       console.warn('[Captcha] No value in result, ignoring');
       return;
     }
@@ -65,8 +69,24 @@ export default function VerifyPage() {
       return;
     }
 
-    console.log('[Captcha] Setting captcha result');
+    // For Turnstile, ensure token is valid format
+    if (res.type === "turnstile") {
+      if (res.value.length < 100) {
+        console.error('[Captcha] Turnstile token seems too short:', res.value.length);
+        setStatusMsg(t.verifyFailed + ' (Token tidak valid)');
+        return;
+      }
+    }
+
+    console.log('[Captcha] Setting captcha result, proceeding to verification');
     setCaptchaResult(res);
+    
+    // Auto-submit jika Turnstile berhasil (optional, bisa di-comment jika ingin manual)
+    // if (res.type === "turnstile" && res.value) {
+    //   setTimeout(() => {
+    //     handleVerify();
+    //   }, 500);
+    // }
   }, [t.verifyFailed]);
 
   // Initial Load & Pre-check
@@ -152,11 +172,22 @@ export default function VerifyPage() {
     return;
   }
 
+  // Validate Turnstile token format
+  if (captchaResult.type === 'turnstile') {
+    if (captchaResult.value.length < 100) {
+      console.error('[Verify] Turnstile token too short:', captchaResult.value.length);
+      setStatusMsg(t.verifyFailed + ' (Token tidak valid)');
+      setCaptchaResult(null);
+      return;
+    }
+  }
+
   console.log('[Verify] Starting verification', { 
     token: token.substring(0, 10) + '...', 
     captchaType: captchaResult.type,
     hasValue: !!captchaResult.value,
-    tokenLength: captchaResult.value.length
+    tokenLength: captchaResult.value.length,
+    timestamp: new Date().toISOString()
   });
 
   setStep(2);
@@ -167,7 +198,7 @@ export default function VerifyPage() {
     token,
     captchaResult: {
       type: captchaResult.type,
-      value: captchaResult.value
+      value: captchaResult.value.trim() // Ensure no whitespace
     },
   };
 
