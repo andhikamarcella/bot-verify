@@ -46,6 +46,7 @@ module.exports = {
             '`/blacklist add|remove|list` • Kelola daftar blacklist\n' +
             '`/admin suspect|trust|risk <user>` • Tandai atau nilai ulang risiko akun\n' +
             '`/whois <user>` • Lihat detail verifikasi cepat dengan badge & risiko\n' +
+            '`/mod kick|ban|timeout|pin|react|announce` • (Staff) Moderation tools\n' +
             '`/rpc mode <default|games>` • (Staff) Ganti status playing bot',
         },
         {
@@ -54,6 +55,9 @@ module.exports = {
             '`/help` • Tampilkan panduan ini\n' +
             '`/about` • Info bot & tautan server resmi\n' +
             '`/ai <prompt>` • Chat AI (Member)\n' +
+            '`/voiceverify start|stop` • Verifikasi via voice (eksperimental)\n' +
+            '`/say <text>` • (Staff) Join voice & bicara (TTS)\n' +
+            '`/dis` • (Staff) Disconnect dari voice\n' +
             '`/ping` • Cek latensi bot\n' +
             '`/userinfo [user]` • Lihat info user & nickname',
         }
