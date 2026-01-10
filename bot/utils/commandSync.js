@@ -42,7 +42,20 @@ function shouldBypassTimeout(label, route) {
 
 async function restCall(rest, method, route, options, label) {
   const startedAt = Date.now();
+  const heartbeatRaw =
+    process.env.DISCORD_REST_HEARTBEAT_MS === undefined
+      ? 15000
+      : Number(process.env.DISCORD_REST_HEARTBEAT_MS);
+  const heartbeatMs = Number.isFinite(heartbeatRaw) && heartbeatRaw > 0 ? heartbeatRaw : null;
+  let heartbeatTimer = null;
   try {
+    console.log(`➡️  ${label}...`);
+    if (heartbeatMs) {
+      heartbeatTimer = setInterval(() => {
+        const elapsed = Date.now() - startedAt;
+        console.log(`⏳ ${label} masih berjalan... (${elapsed}ms)`);
+      }, heartbeatMs);
+    }
     const callPromise = rest[method](route, options);
     const result = await (shouldBypassTimeout(label, route) ? callPromise : withTimeout(callPromise, label));
     const elapsed = Date.now() - startedAt;
@@ -52,6 +65,10 @@ async function restCall(rest, method, route, options, label) {
     const elapsed = Date.now() - startedAt;
     console.warn(`❌ ${label} gagal (${elapsed}ms): ${error?.message || error}`);
     throw error;
+  } finally {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+    }
   }
 }
 
@@ -224,7 +241,9 @@ async function syncGuildCommandsIndividually(rest, clientId, guildId, payload) {
 
   const desiredNames = new Set(payload.map((cmd) => cmd.name));
 
-  for (const cmd of payload) {
+  for (let index = 0; index < payload.length; index += 1) {
+    const cmd = payload[index];
+    console.log(`🛠️  Sync command guild [${index + 1}/${payload.length}]: ${cmd.name}`);
     const found = existingByName.get(cmd.name);
     if (found?.id) {
       await restCall(
