@@ -2,6 +2,34 @@ const fs = require('fs');
 const path = require('path');
 const { Routes } = require('discord.js');
 
+const REST_TIMEOUT_MS = Number(process.env.DISCORD_REST_TIMEOUT_MS || 30_000);
+
+function withTimeout(promise, label) {
+  let timer = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout:${label}`)), REST_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  });
+}
+
+async function restCall(rest, method, route, options, label) {
+  const startedAt = Date.now();
+  try {
+    const result = await withTimeout(rest[method](route, options), label);
+    const elapsed = Date.now() - startedAt;
+    console.log(`✅ ${label} (${elapsed}ms)`);
+    return result;
+  } catch (error) {
+    const elapsed = Date.now() - startedAt;
+    console.warn(`❌ ${label} gagal (${elapsed}ms): ${error?.message || error}`);
+    throw error;
+  }
+}
+
 function collectCommandFiles(dirPath) {
   const entries = fs.readdirSync(dirPath, { withFileTypes: true });
   const files = [];
@@ -64,7 +92,7 @@ async function clearGlobalCommands(rest, clientId) {
     const globalRoute = Routes.applicationCommands(clientId);
     let commands = [];
     try {
-      commands = await rest.get(globalRoute);
+      commands = await restCall(rest, 'get', globalRoute, undefined, 'Ambil command global');
     } catch (error) {
       console.warn('⚠️  Gagal mengambil command global:', error?.message || error);
       return;
@@ -76,7 +104,13 @@ async function clearGlobalCommands(rest, clientId) {
 
     for (const command of commands) {
       try {
-        await rest.delete(Routes.applicationCommand(clientId, command.id));
+        await restCall(
+          rest,
+          'delete',
+          Routes.applicationCommand(clientId, command.id),
+          undefined,
+          `Hapus command global ${command.name}`
+        );
       } catch (error) {
         const errorCode = error?.code ?? error?.rawError?.code;
         if (errorCode === 50240) {
@@ -104,18 +138,24 @@ async function clearGlobalCommands(rest, clientId) {
 
 async function clearGuildCommands(rest, clientId, guildId) {
   const guildRoute = Routes.applicationGuildCommands(clientId, guildId);
-  await rest.put(guildRoute, { body: [] });
-  const remaining = await rest.get(guildRoute);
+  await restCall(rest, 'put', guildRoute, { body: [] }, `Bersihkan command guild ${guildId}`);
+  const remaining = await restCall(rest, 'get', guildRoute, undefined, `Cek sisa command guild ${guildId}`);
   if (Array.isArray(remaining) && remaining.length > 0) {
     for (const command of remaining) {
-      await rest.delete(Routes.applicationGuildCommand(clientId, guildId, command.id));
+      await restCall(
+        rest,
+        'delete',
+        Routes.applicationGuildCommand(clientId, guildId, command.id),
+        undefined,
+        `Hapus command guild ${command.name}`
+      );
     }
   }
 }
 
 async function removeDuplicateGuildCommands(rest, clientId, guildId) {
   const guildRoute = Routes.applicationGuildCommands(clientId, guildId);
-  const commands = await rest.get(guildRoute);
+  const commands = await restCall(rest, 'get', guildRoute, undefined, `Ambil command guild ${guildId}`);
   if (!Array.isArray(commands) || commands.length === 0) {
     return;
   }
@@ -132,7 +172,13 @@ async function removeDuplicateGuildCommands(rest, clientId, guildId) {
     return;
   }
   for (const command of duplicates) {
-    await rest.delete(Routes.applicationGuildCommand(clientId, guildId, command.id));
+    await restCall(
+      rest,
+      'delete',
+      Routes.applicationGuildCommand(clientId, guildId, command.id),
+      undefined,
+      `Hapus duplicate command guild ${command.name}`
+    );
   }
   console.warn(
     `⚠️  Duplicate slash command dihapus: ${duplicates.map((cmd) => cmd.name).join(', ')}`
@@ -153,7 +199,7 @@ async function syncGuildCommands(rest, clientId, guildId, manifest) {
     seen.add(entry.json.name);
     payload.push(entry.json);
   }
-  await rest.put(guildRoute, { body: payload });
+  await restCall(rest, 'put', guildRoute, { body: payload }, `Pasang command guild ${guildId}`);
   await removeDuplicateGuildCommands(rest, clientId, guildId);
   return payload.map((item) => item.name);
 }
