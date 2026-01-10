@@ -1,7 +1,7 @@
 'use client';
 
 import { Dialog, Transition } from '@headlessui/react';
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 interface PolicyModalProps {
   isOpen: boolean;
@@ -17,9 +17,19 @@ export function PolicyModal({ isOpen, onClose, title, content, onAgree, agreeTex
   const [canAgree, setCanAgree] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    if (isOpen) {
+      setCanAgree(false);
+    }
+  }, [isOpen]);
+
   const handleScroll = () => {
     if (contentRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = contentRef.current;
+      if (scrollHeight <= clientHeight + 4) {
+        setCanAgree(true);
+        return;
+      }
       if (scrollTop + clientHeight >= scrollHeight - 50) { // Tolerance
         setCanAgree(true);
       }
@@ -62,7 +72,7 @@ export function PolicyModal({ isOpen, onClose, title, content, onAgree, agreeTex
                 <div 
                     ref={contentRef}
                     onScroll={handleScroll}
-                    className="mt-2 max-h-[60vh] overflow-y-auto pr-2 text-slate-300 text-sm space-y-4 border-b border-slate-700 pb-4"
+                    className="mt-2 max-h-[60vh] overflow-y-auto pr-2 text-slate-300 text-sm space-y-4 border-b border-slate-700 pb-2"
                 >
                   {content}
                 </div>
