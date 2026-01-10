@@ -71,19 +71,33 @@ async function verifyTurnstile(token, secret, ip) {
       errors: data['error-codes'],
       hostname: data.hostname,
       action: data.action,
+      challenge_ts: data.challenge_ts,
     });
 
     if (!data.success) {
-      console.warn('[Turnstile] Verification failed', {
-        errors: data['error-codes'],
-        hostname: data.hostname,
-        action: data.action,
-        cdata: data.cdata,
-      });
+      const errorCodes = data['error-codes'] || [];
+      console.error('[Turnstile] Verification failed with errors:', errorCodes);
+      console.error('[Turnstile] Full response:', JSON.stringify(data, null, 2));
+      
+      // Log specific error messages
+      if (errorCodes.includes('invalid-input-secret')) {
+        console.error('[Turnstile] ERROR: Secret key is invalid! Please check TURNSTILE_SECRET_KEY in environment variables.');
+        console.error('[Turnstile] Expected format: 0x4AAAAAACLgWogcgJIr77XDr6fY5XQR4aQ');
+      }
+      if (errorCodes.includes('invalid-input-response')) {
+        console.error('[Turnstile] ERROR: Token is invalid or expired');
+      }
+      if (errorCodes.includes('timeout-or-duplicate')) {
+        console.error('[Turnstile] ERROR: Token was already used or expired');
+      }
+      if (errorCodes.includes('internal-error')) {
+        console.error('[Turnstile] ERROR: Cloudflare internal error');
+      }
+      
       return false;
     }
 
-    console.log('[Turnstile] Verification successful');
+    console.log('[Turnstile] ✅ Verification successful!');
     return true;
   } catch (err) {
     console.error('[Turnstile] Exception:', err);
