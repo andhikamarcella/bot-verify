@@ -63,7 +63,78 @@ const gamePresenceMessages = [
   'The Elder Scrolls',
 ];
 
+const funFactMessages = [
+  'Fun Fact: Hiu lebih tua dari pohon 🌊',
+  'Fun Fact: Gurita punya 3 jantung 🐙',
+  'Fun Fact: Madu tidak basi (bisa awet bertahun-tahun) 🍯',
+  'Fun Fact: Pisang itu berry, stroberi bukan 🍌',
+  'Fun Fact: Ada lebih banyak bintang di alam semesta daripada pasir di Bumi ✨',
+];
+
+const dadJokeMessages = [
+  'Jokes: Kenapa komputer suka dingin? Karena banyak kipasnya.',
+  'Jokes: Aku bukan pemalas, aku cuma hemat energi.',
+  'Jokes: Kalau hidupmu gelap, mungkin kamu belum bayar listrik.',
+  'Jokes: Kamu tau kenapa jam nggak bisa bohong? Karena dia berdetak.',
+  'Jokes: Kenapa ikan nggak pernah nabrak? Karena mereka selalu lihat kiri-kanan (sirip).',
+];
+
 let presenceMode = process.env.PRESENCE_MODE || 'default';
+
+function truncatePresence(text) {
+  const raw = String(text || '');
+  if (raw.length <= 128) return raw;
+  return `${raw.slice(0, 125)}...`;
+}
+
+function buildCommandPresenceMessages() {
+  if (!Array.isArray(commandManifest) || commandManifest.length === 0) {
+    return [];
+  }
+  const candidates = commandManifest
+    .map((entry) => entry?.name)
+    .filter(Boolean)
+    .filter((name) => !['admin', 'settings', 'blacklist', 'rpc'].includes(String(name)));
+
+  const unique = Array.from(new Set(candidates));
+  const base = unique.slice(0, 10);
+  return base.map((name) => truncatePresence(`Try /${name}`));
+}
+
+function getPresencePoolForMode(mode) {
+  const normalized = String(mode || '').toLowerCase();
+
+  if (normalized === 'games') return gamePresenceMessages;
+  if (normalized === 'funfact') return funFactMessages.map(truncatePresence);
+  if (normalized === 'dadjoke') return dadJokeMessages.map(truncatePresence);
+  if (normalized === 'commands') {
+    const commands = buildCommandPresenceMessages();
+    return commands.length ? commands : presenceMessages;
+  }
+  if (normalized === 'mixed') {
+    const commands = buildCommandPresenceMessages();
+    const pool = [];
+    const defaults = presenceMessages;
+    const facts = funFactMessages;
+    const jokes = dadJokeMessages;
+
+    const maxLen = Math.max(commands.length, defaults.length, facts.length, jokes.length, 1);
+    for (let i = 0; i < maxLen; i += 1) {
+      if (commands[i]) pool.push(truncatePresence(commands[i]));
+      if (defaults[i]) pool.push(truncatePresence(defaults[i]));
+      if (facts[i]) pool.push(truncatePresence(facts[i]));
+      if (jokes[i]) pool.push(truncatePresence(jokes[i]));
+    }
+    return pool.length ? pool : presenceMessages;
+  }
+
+  return presenceMessages;
+}
+
+function modeHasButtons(mode) {
+  const normalized = String(mode || '').toLowerCase();
+  return normalized === 'default' || normalized === 'commands';
+}
 
 function getPresenceMode() {
   return presenceMode;
@@ -71,7 +142,14 @@ function getPresenceMode() {
 
 function setPresenceMode(mode) {
   const normalized = String(mode || '').toLowerCase();
-  if (normalized !== 'default' && normalized !== 'games') {
+  if (
+    normalized !== 'default' &&
+    normalized !== 'games' &&
+    normalized !== 'commands' &&
+    normalized !== 'funfact' &&
+    normalized !== 'dadjoke' &&
+    normalized !== 'mixed'
+  ) {
     throw new Error('invalid-presence-mode');
   }
   presenceMode = normalized;
@@ -414,7 +492,7 @@ client.once(Events.ClientReady, () => {
 
   let presenceIndex = 0;
   const applyPresence = () => {
-    const pool = presenceMode === 'games' ? gamePresenceMessages : presenceMessages;
+    const pool = getPresencePoolForMode(presenceMode);
     const message = pool[presenceIndex % pool.length];
 
     const activity = {
@@ -422,7 +500,7 @@ client.once(Events.ClientReady, () => {
       type: ActivityType.Playing,
     };
 
-    if (presenceMode !== 'games') {
+    if (modeHasButtons(presenceMode)) {
       activity.buttons = ['Join Support Server'];
       activity.metadata = { button_urls: [SUPPORT_INVITE_URL] };
       activity.url = SUPPORT_INVITE_URL;
@@ -527,4 +605,5 @@ module.exports = {
   cancelReminder,
   getPresenceMode,
   setPresenceMode,
+  getPresencePoolForMode,
 };
