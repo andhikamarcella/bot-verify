@@ -2,7 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { Events } = require('discord.js');
 const client = require('../../bot/discordClient');
-const { createTokenDocument, findToken, setTokenStatus, bindIpToToken } = require('../models/Tokens');
+const { createTokenDocument, findToken, setTokenStatus, bindIpToToken, listDmMessagesForUser } = require('../models/Tokens');
 const { upsertUserProfile } = require('../models/Users');
 const { insertLog } = require('../models/VerificationLog');
 const { hashIp } = require('../lib/hashIp');
@@ -16,7 +16,7 @@ const {
   upsertVerificationProfile,
   setRiskScore,
 } = require('../models/VerificationProfiles');
-const { insertHistoryEntry } = require('../models/VerificationHistory');
+const { insertHistoryEntry, clearHistoryForUser } = require('../models/VerificationHistory');
 const { computeRiskScore } = require('../lib/riskScore');
 const { sendVerificationLog } = require('../../bot/utils/logging');
 
@@ -133,6 +133,20 @@ router.post('/create-token', async (req, res) => {
     }
 
     await ensureReady();
+
+    const blacklistEntry = await getBlacklistEntry(userId, GUILD_ID).catch(() => null);
+    if (blacklistEntry) {
+      try {
+        const guild = await client.guilds.fetch(GUILD_ID);
+        const member = await guild.members.fetch(userId).catch(() => null);
+        if (member) {
+          await member.kick(`Blacklisted: ${blacklistEntry.reason || 'unspecified'}`).catch(() => {});
+        }
+      } catch (_) {
+        // ignore
+      }
+      return res.status(403).json({ ok: false, error: 'blacklisted' });
+    }
 
     const extraRoles = await getExtraRolesForUser(client, userId);
     const token = crypto.randomUUID();
@@ -315,6 +329,37 @@ router.post('/verify', async (req, res) => {
     const user = member.user;
     const blacklistEntry = await getBlacklistEntry(record.userId, record.guildId);
 
+    if (blacklistEntry) {
+      await setTokenStatus(token, 'FAILED', { failureReason: 'blacklisted' }).catch(() => {});
+      await insertLog({
+        userId: record.userId,
+        guildId: record.guildId,
+        ipHash: hashIp(bodyIp || req.ip),
+        result: 'FAILED',
+        reason: 'blacklisted',
+      }).catch(() => {});
+      await insertHistoryEntry({
+        userId: record.userId,
+        guildId: record.guildId,
+        status: 'failed',
+        reason: `blacklisted:${blacklistEntry.reason || 'unspecified'}`,
+      }).catch(() => {});
+      await sendVerificationLog({
+        client,
+        guildId: record.guildId,
+        config,
+        user,
+        member,
+        type: 'failure',
+        status: 'BLACKLISTED',
+        riskScore: profile?.riskScore ?? 100,
+        suspectReasons,
+        reason: `Blacklisted: ${blacklistEntry.reason || 'unspecified'}`,
+      }).catch(() => {});
+      await member.kick(`Blacklisted: ${blacklistEntry.reason || 'unspecified'}`).catch(() => {});
+      return res.status(403).json({ ok: false, error: 'blacklisted' });
+    }
+
     const rolesToApply = new Set();
     if (MEMBER_ROLE_ID) {
       rolesToApply.add(MEMBER_ROLE_ID);
@@ -347,7 +392,7 @@ router.post('/verify', async (req, res) => {
     }
 
     const now = new Date();
-    await setTokenStatus(token, 'VERIFIED', { verifiedAt: now });
+    const verifiedToken = await setTokenStatus(token, 'VERIFIED', { verifiedAt: now });
     await insertLog({
       userId: record.userId,
       guildId: record.guildId,
@@ -389,6 +434,39 @@ router.post('/verify', async (req, res) => {
       riskScore,
     });
 
+    const dmMessages = await listDmMessagesForUser(record.userId, record.guildId, 25).catch(() => []);
+    for (const item of dmMessages) {
+      const channelId = item?.dmChannelId;
+      const messageId = item?.dmMessageId;
+      if (!channelId || !messageId) continue;
+      try {
+        const dmChannel = await client.channels.fetch(channelId);
+        if (dmChannel?.messages) {
+          const msg = await dmChannel.messages.fetch(messageId).catch(() => null);
+          if (msg) {
+            await msg.delete().catch(() => {});
+          }
+        }
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    if (verifiedToken?.dmChannelId && verifiedToken?.dmMessageId) {
+      try {
+        const dmChannel = await client.channels.fetch(verifiedToken.dmChannelId);
+        if (dmChannel?.messages) {
+          const msg = await dmChannel.messages.fetch(verifiedToken.dmMessageId).catch(() => null);
+          if (msg) {
+            await msg.delete().catch(() => {});
+          }
+        }
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    await clearHistoryForUser(record.userId, record.guildId).catch(() => {});
     await insertHistoryEntry({
       userId: record.userId,
       guildId: record.guildId,
