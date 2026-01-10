@@ -13,6 +13,10 @@ function sleep(ms) {
 }
 
 function withTimeout(promise, label) {
+  const normalizedLabel = String(label || '').toLowerCase();
+  if (normalizedLabel.includes('command guild')) {
+    return promise;
+  }
   if (!REST_TIMEOUT_MS) {
     return promise;
   }
@@ -27,10 +31,20 @@ function withTimeout(promise, label) {
   });
 }
 
+function shouldBypassTimeout(label, route) {
+  const normalizedLabel = String(label || '').toLowerCase();
+  if (normalizedLabel.includes('command guild')) {
+    return true;
+  }
+  const normalizedRoute = String(route || '');
+  return normalizedRoute.includes('/guilds/') && normalizedRoute.includes('/commands');
+}
+
 async function restCall(rest, method, route, options, label) {
   const startedAt = Date.now();
   try {
-    const result = await withTimeout(rest[method](route, options), label);
+    const callPromise = rest[method](route, options);
+    const result = await (shouldBypassTimeout(label, route) ? callPromise : withTimeout(callPromise, label));
     const elapsed = Date.now() - startedAt;
     console.log(`✅ ${label} (${elapsed}ms)`);
     return result;
@@ -280,7 +294,7 @@ async function syncGuildCommands(rest, clientId, guildId, manifest) {
     `🧾 Menyiapkan ${payload.length} command untuk guild ${guildId} (~${Math.round(payloadBytes / 1024)}KB)...`
   );
 
-  const modeRaw = String(process.env.COMMAND_SYNC_MODE || 'auto').toLowerCase();
+  const modeRaw = String(process.env.COMMAND_SYNC_MODE || 'individual').toLowerCase();
   const mode = modeRaw === 'bulk' || modeRaw === 'individual' ? modeRaw : 'auto';
 
   if (mode === 'individual') {
