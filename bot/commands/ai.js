@@ -2,7 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const { ensureMemberOrHigher } = require('../utils/permissions');
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = 'llama3-70b-8192';
+const MODEL = 'llama-3.1-70b-versatile';
 
 function chunkText(text, maxLen) {
   const chunks = [];
