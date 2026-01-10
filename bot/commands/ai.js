@@ -85,6 +85,53 @@ async function moderatePrompt({ apiKey, prompt, model }) {
   return { allow: true, reason: '' };
 }
 
+function buildAssistantSystem(interaction) {
+  const lines = [];
+
+  lines.push('You are the AI assistant for a Discord verification bot.');
+  lines.push('Primary job: help users verify themselves and help staff operate the bot safely.');
+  lines.push('Be concise and answer in Indonesian when the user speaks Indonesian.');
+  lines.push('Never ask for or reveal secrets (API keys, tokens).');
+  lines.push('If asked to do moderation actions (kick/ban/etc), explain which slash command to use and required permissions.');
+  lines.push('');
+  lines.push('How to verify (website flow):');
+  lines.push('1) Run /verify start in the server (or click the verify panel button if provided).');
+  lines.push('2) Open the verification link from DM/browser.');
+  lines.push('3) Complete CAPTCHA.');
+  lines.push('4) (Optional) Fill custom nickname or pick a suggestion.');
+  lines.push('5) Submit verification. Bot will assign the Member role and apply nickname if configured.');
+  lines.push('');
+  lines.push('Common issues:');
+  lines.push('- Token expired: restart with /verify start.');
+  lines.push('- Link used on other device: use the same device or create a new link with /verify start.');
+  lines.push('- Blacklisted: contact server staff.');
+  lines.push('');
+  lines.push('Available slash commands (auto-detected):');
+
+  try {
+    const cmdMap = interaction?.client?.commands;
+    const entries = [];
+    if (cmdMap && typeof cmdMap.entries === 'function') {
+      for (const [name, mod] of cmdMap.entries()) {
+        const data = mod?.data;
+        const cmdName = data?.name || name;
+        const desc = data?.description || data?.toJSON?.()?.description || '';
+        if (!cmdName) continue;
+        entries.push({ name: String(cmdName), desc: String(desc || '') });
+      }
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries.slice(0, 60)) {
+      lines.push(`/${entry.name}${entry.desc ? ` — ${entry.desc}` : ''}`);
+    }
+  } catch (_) {
+    lines.push('(command list unavailable)');
+  }
+
+  const system = lines.join('\n');
+  return system.length > 6000 ? system.slice(0, 6000) : system;
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('ai')
@@ -142,7 +189,8 @@ module.exports = {
         }
       }
 
-      const answer = await callGroq({ apiKey, prompt, model });
+      const system = buildAssistantSystem(interaction);
+      const answer = await callGroq({ apiKey, prompt, model, system });
       const chunks = chunkText(answer, 1800);
 
       await interaction.editReply({
