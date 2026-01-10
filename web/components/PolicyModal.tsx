@@ -23,6 +23,19 @@ export function PolicyModal({ isOpen, onClose, title, content, onAgree, agreeTex
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const node = contentRef.current;
+    if (!node) return;
+    const check = () => {
+      const { scrollHeight, clientHeight } = node;
+      if (scrollHeight <= clientHeight + 4) {
+        setCanAgree(true);
+      }
+    };
+    requestAnimationFrame(check);
+  }, [content, isOpen]);
+
   const handleScroll = () => {
     if (contentRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = contentRef.current;
@@ -62,7 +75,7 @@ export function PolicyModal({ isOpen, onClose, title, content, onAgree, agreeTex
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-2xl transform overflow-hidden rounded-2xl bg-slate-900 border border-slate-700 p-6 text-left align-middle shadow-xl transition-all">
+              <Dialog.Panel className="w-full max-w-2xl max-h-[85vh] flex flex-col transform overflow-hidden rounded-2xl bg-slate-900 border border-slate-700 p-6 text-left align-middle shadow-xl transition-all">
                 <Dialog.Title
                   as="h3"
                   className="text-lg font-medium leading-6 text-white mb-4"
@@ -72,7 +85,7 @@ export function PolicyModal({ isOpen, onClose, title, content, onAgree, agreeTex
                 <div 
                     ref={contentRef}
                     onScroll={handleScroll}
-                    className="mt-2 max-h-[60vh] overflow-y-auto pr-2 text-slate-300 text-sm space-y-4 border-b border-slate-700 pb-2"
+                    className="mt-2 flex-1 min-h-0 overflow-y-auto pr-2 text-slate-300 text-sm space-y-4 border-b border-slate-700 pb-2"
                 >
                   {content}
                 </div>
