@@ -15,6 +15,11 @@ export type CopyShape = {
   captchaMissing: string;
   captchaFallback: string;
   footer: string;
+
+  nicknameLabel: string;
+  nicknamePlaceholder: string;
+  nicknameHint: string;
+  nicknameSuggestions: string;
   
   // New Additions
   step0: string;
@@ -79,6 +84,11 @@ const COPY: Record<LocaleKey, CopyShape> = {
     captchaMissing: 'Please complete the security check.',
     captchaFallback: 'Click the emoji {emoji} to continue.',
     footer: 'Need help? Use /help in the server.',
+
+    nicknameLabel: 'Nickname (optional)',
+    nicknamePlaceholder: 'Enter your desired nickname...',
+    nicknameHint: 'This will be used as your server nickname after verification (max 32 chars).',
+    nicknameSuggestions: 'Suggestions',
     
     step0: 'Agreement',
     step1: 'Security Check',
@@ -171,6 +181,11 @@ const COPY: Record<LocaleKey, CopyShape> = {
     captchaMissing: 'Silakan selesaikan pemeriksaan keamanan.',
     captchaFallback: 'Klik emoji {emoji} untuk lanjut.',
     footer: 'Butuh bantuan? Gunakan /help di server.',
+
+    nicknameLabel: 'Nickname (opsional)',
+    nicknamePlaceholder: 'Isi nickname yang kamu mau...',
+    nicknameHint: 'Akan dipakai sebagai nickname di server setelah verifikasi (maks 32 karakter).',
+    nicknameSuggestions: 'Saran',
     
     step0: 'Persetujuan',
     step1: 'Cek Keamanan',
