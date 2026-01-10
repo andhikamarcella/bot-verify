@@ -371,6 +371,16 @@ export default function VerifyPage() {
                         </div>
                     </div>
 
+                    <details className="bg-slate-800/20 p-4 rounded-xl border border-slate-700/40">
+                        <summary className="cursor-pointer text-sm font-semibold text-white">{t.faq.title}</summary>
+                        <div className="mt-3 text-xs text-slate-300 space-y-2">
+                            <div>
+                                <div className="font-semibold text-slate-200">{t.faq.q1}</div>
+                                <div className="text-slate-400 leading-relaxed">{t.faq.a1}</div>
+                            </div>
+                        </div>
+                    </details>
+
                     <div className="space-y-3">
                         <label className="flex items-start gap-3 cursor-pointer group">
                             <div className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center transition ${agreedTerms ? 'bg-cyan-500 border-cyan-500' : 'border-slate-600 group-hover:border-slate-500'}`}>
@@ -499,7 +509,6 @@ export default function VerifyPage() {
                         {item.text.replace('{guildName}', guildName)}
                     </p>
                 ))}
-                <div className="h-32"></div>
             </div>
         } 
       />
@@ -519,7 +528,6 @@ export default function VerifyPage() {
                         {item.text}
                     </p>
                 ))}
-                <div className="h-32"></div>
             </div>
         } 
       />
