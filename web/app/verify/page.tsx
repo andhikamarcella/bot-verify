@@ -26,6 +26,7 @@ interface PreCheckResponse {
   envStatus: EnvStatus;
   tokenValid?: boolean;
   expiresIn?: number;
+  nicknameSuggestions?: string[];
   error?: string;
   reason?: string;
 }
@@ -49,6 +50,9 @@ export default function VerifyPage() {
   const [agreedPrivacy, setAgreedPrivacy] = useState(false);
   
   const [captchaResult, setCaptchaResult] = useState<{ type: "turnstile" | "fallbackEmoji"; value: string } | null>(null);
+
+  const [nickname, setNickname] = useState<string>('');
+  const [nicknameSuggestions, setNicknameSuggestions] = useState<string[]>([]);
 
   // Memoize callback untuk mencegah re-render
   const handleCaptchaSolved = useCallback((res: { type: "turnstile" | "fallbackEmoji"; value: string }) => {
@@ -115,6 +119,19 @@ export default function VerifyPage() {
       .then(data => {
         setEnvStatus(data.envStatus);
         setLoading(false);
+
+        if (Array.isArray(data.nicknameSuggestions)) {
+          setNicknameSuggestions(
+            Array.from(
+              new Set(
+                data.nicknameSuggestions
+                  .map((v) => String(v || '').trim())
+                  .filter(Boolean)
+                  .map((v) => v.slice(0, 32))
+              )
+            )
+          );
+        }
         
         if (data.ok && data.tokenValid && data.expiresIn) {
              setTimeLeft(data.expiresIn);
@@ -200,6 +217,7 @@ export default function VerifyPage() {
       type: captchaResult.type,
       value: captchaResult.value.trim() // Ensure no whitespace
     },
+    profile: nickname.trim() ? { displayName: nickname.trim().slice(0, 32) } : undefined,
   };
 
   try {
@@ -420,6 +438,35 @@ export default function VerifyPage() {
                     <div className="text-center">
                         <h2 className="text-xl font-bold text-white mb-2">{t.step1}</h2>
                         <p className="text-sm text-slate-400">{t.captchaMissing}</p>
+                    </div>
+
+                    <div className="space-y-2">
+                        <div className="text-xs font-semibold text-slate-200">{t.nicknameLabel}</div>
+                        <input
+                            value={nickname}
+                            onChange={(e) => setNickname(e.target.value.slice(0, 32))}
+                            placeholder={t.nicknamePlaceholder}
+                            className="w-full rounded-xl bg-slate-800/40 border border-slate-700/50 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                        />
+                        <div className="text-[11px] text-slate-400">{t.nicknameHint}</div>
+
+                        {nicknameSuggestions.length > 0 && (
+                            <div className="pt-1">
+                                <div className="text-[11px] text-slate-400 mb-2">{t.nicknameSuggestions}</div>
+                                <div className="flex flex-wrap gap-2">
+                                    {nicknameSuggestions.map((s) => (
+                                        <button
+                                            key={s}
+                                            type="button"
+                                            onClick={() => setNickname(s)}
+                                            className="px-3 py-1.5 rounded-full bg-slate-800/60 border border-slate-700/60 text-[11px] text-slate-200 hover:bg-slate-700/60 transition"
+                                        >
+                                            {s}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="flex justify-center p-4 bg-slate-800/30 rounded-2xl border border-slate-700/50">
