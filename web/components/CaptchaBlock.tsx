@@ -24,10 +24,20 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
 
   // Memoize callback untuk mencegah re-render
   const handleSolved = useCallback((result: { type: 'turnstile' | 'fallbackEmoji'; value: string }) => {
-    if (hasCalledCallback.current) {
+    // Allow callback untuk expired token (empty value) untuk reset
+    if (result.type === 'turnstile' && !result.value) {
+      // Token expired, reset flag untuk allow retry
+      hasCalledCallback.current = false;
+      return;
+    }
+    
+    if (hasCalledCallback.current && result.value) {
+      console.log('[Turnstile] Callback already called, ignoring');
       return; // Prevent multiple calls
     }
+    
     if (result.value) {
+      console.log('[Turnstile] Calling onSolved with token');
       hasCalledCallback.current = true;
       onSolved(result);
     }
@@ -69,13 +79,21 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
             widgetId.current = window.turnstile.render(containerRef.current, {
                 sitekey: siteKey,
                 callback: (token: string) => {
-                    if (token && !hasCalledCallback.current) {
-                        console.log('[Turnstile] Token received');
-                        handleSolved({ type: 'turnstile', value: token });
+                    console.log('[Turnstile] Callback triggered with token:', token ? 'present' : 'missing');
+                    if (token) {
+                        if (!hasCalledCallback.current) {
+                            console.log('[Turnstile] Token received, calling handleSolved');
+                            handleSolved({ type: 'turnstile', value: token });
+                        } else {
+                            console.log('[Turnstile] Token received but callback already called');
+                        }
+                    } else {
+                        console.warn('[Turnstile] Callback triggered but token is empty');
                     }
                 },
                 'error-callback': (error: any) => {
-                    console.warn('[Turnstile] Error callback:', error);
+                    console.error('[Turnstile] Error callback:', error);
+                    hasCalledCallback.current = false;
                     if (widgetId.current && window.turnstile) {
                         try {
                             window.turnstile.remove(widgetId.current);
@@ -88,7 +106,7 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
                     setUseFallback(true);
                 },
                 'expired-callback': () => {
-                    console.warn('[Turnstile] Token expired');
+                    console.warn('[Turnstile] Token expired, resetting');
                     hasCalledCallback.current = false;
                     if (widgetId.current && window.turnstile) {
                         try {
@@ -97,6 +115,12 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
                             console.error('[Turnstile] Error resetting:', e);
                         }
                     }
+                    // Call with empty value to notify parent
+                    handleSolved({ type: 'turnstile', value: '' });
+                },
+                'timeout-callback': () => {
+                    console.warn('[Turnstile] Timeout callback');
+                    hasCalledCallback.current = false;
                 },
             });
             console.log('[Turnstile] Widget rendered successfully');
