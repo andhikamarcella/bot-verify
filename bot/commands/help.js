@@ -53,6 +53,7 @@ module.exports = {
           value:
             '`/help` • Tampilkan panduan ini\n' +
             '`/about` • Info bot & tautan server resmi\n' +
+            '`/ai <prompt>` • Chat AI (Member)\n' +
             '`/ping` • Cek latensi bot\n' +
             '`/userinfo [user]` • Lihat info user & nickname',
         }
