@@ -51,8 +51,31 @@ function attachRateLimitLogger(rest) {
   });
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms, signal) {
+  const duration = Number(ms) || 0;
+  if (signal?.aborted) {
+    const err = new Error('aborted');
+    err.name = 'AbortError';
+    throw err;
+  }
+  return new Promise((resolve, reject) => {
+    let timer = null;
+    const onAbort = () => {
+      if (timer) clearTimeout(timer);
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      reject(err);
+    };
+    if (signal && typeof signal.addEventListener === 'function') {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    timer = setTimeout(() => {
+      if (signal && typeof signal.removeEventListener === 'function') {
+        signal.removeEventListener('abort', onAbort);
+      }
+      resolve();
+    }, duration);
+  });
 }
 
 function buildDiscordApiUrl(route) {
@@ -79,6 +102,11 @@ async function fetchDiscordApi(method, route, options, label, signal) {
   const body = hasBody ? JSON.stringify(rawBody) : undefined;
 
   while (true) {
+    if (signal?.aborted) {
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      throw err;
+    }
     const res = await fetch(url, {
       method: String(method || '').toUpperCase(),
       headers: {
@@ -106,7 +134,7 @@ async function fetchDiscordApi(method, route, options, label, signal) {
       console.warn(
         `🛑 Discord rate limit${isGlobal ? ' (GLOBAL)' : ''}: ${String(method || '').toUpperCase()} ${route} • wait=${retryAfterMs}ms`
       );
-      await sleep(retryAfterMs);
+      await sleep(retryAfterMs, signal);
       continue;
     }
 
@@ -174,6 +202,9 @@ function shouldBypassTimeout(label, route) {
     return true;
   }
   const normalizedRoute = String(route || '');
+  if (normalizedRoute.includes('/commands')) {
+    return true;
+  }
   return normalizedRoute.includes('/guilds/') && normalizedRoute.includes('/commands');
 }
 
@@ -195,6 +226,7 @@ async function restCall(rest, method, route, options, label) {
     const attemptLabel = attempt > 1 ? `${label} (attempt ${attempt}/${maxAttempts})` : label;
     const startedAt = Date.now();
     let heartbeatTimer = null;
+    let controller = null;
     try {
       console.log(`➡️  ${attemptLabel}... [${String(method || '').toUpperCase()} ${route}]`);
       if (heartbeatMs) {
@@ -204,7 +236,7 @@ async function restCall(rest, method, route, options, label) {
         }, heartbeatMs);
       }
 
-      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      controller = typeof AbortController === 'function' ? new AbortController() : null;
       let abortTimer = null;
       if (controller && REST_HARD_TIMEOUT_MS) {
         abortTimer = setTimeout(() => {
@@ -242,7 +274,7 @@ async function restCall(rest, method, route, options, label) {
       if (attempt < maxAttempts) {
         const backoffMs = Math.min(15000, 2000 * attempt);
         console.warn(`🔁 Retry dalam ${backoffMs}ms...`);
-        await sleep(backoffMs);
+        await sleep(backoffMs, controller?.signal);
         continue;
       }
       throw error;
