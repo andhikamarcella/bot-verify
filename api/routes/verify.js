@@ -27,7 +27,7 @@ const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;
 const WELCOME_CHANNEL_ID = process.env.WELCOME_CHANNEL_ID;
 const FRONTEND_URL = process.env.PUBLIC_FRONTEND_URL || '';
 const DISCORD_BROWSER_URL = process.env.DISCORD_BROWSER_URL || null;
-const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '0x4AAAAAACLgWogcgJIr77XDr6fY5XQR4aQ';
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '';
 
 function renderNicknameTemplate(template, context) {
   if (!template) {
