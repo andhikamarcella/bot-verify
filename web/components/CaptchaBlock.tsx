@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 interface CaptchaBlockProps {
   onSolved: (result: { type: 'turnstile' | 'fallbackEmoji'; value: string }) => void;
@@ -15,10 +15,23 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
   const [targetEmoji, setTargetEmoji] = useState<string>('🍉');
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetId = useRef<string | null>(null);
+  const hasCalledCallback = useRef<boolean>(false);
+  const isRendering = useRef<boolean>(false);
 
   useEffect(() => {
     setTargetEmoji(FALLBACK_EMOJIS[Math.floor(Math.random() * FALLBACK_EMOJIS.length)]);
   }, []);
+
+  // Memoize callback untuk mencegah re-render
+  const handleSolved = useCallback((result: { type: 'turnstile' | 'fallbackEmoji'; value: string }) => {
+    if (hasCalledCallback.current) {
+      return; // Prevent multiple calls
+    }
+    if (result.value) {
+      hasCalledCallback.current = true;
+      onSolved(result);
+    }
+  }, [onSolved]);
 
   useEffect(() => {
     if (!siteKey || siteKey.trim() === '') {
@@ -27,11 +40,19 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
       return;
     }
 
+    // Reset flag when component mounts
+    hasCalledCallback.current = false;
+    isRendering.current = false;
+
     // Check if script is already present
     let script = document.querySelector('script[src^="https://challenges.cloudflare.com/turnstile/v0/api.js"]') as HTMLScriptElement;
-    let scriptLoaded = false;
     
     const renderTurnstile = () => {
+        if (isRendering.current || widgetId.current) {
+            // Already rendering or rendered
+            return;
+        }
+
         if (!containerRef.current) {
             console.warn('[Turnstile] Container not ready');
             return;
@@ -39,41 +60,50 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
         
         if (!window.turnstile) {
             console.warn('[Turnstile] Turnstile API not available');
-            if (scriptLoaded) {
-                setUseFallback(true);
-            }
             return;
         }
         
-        if (widgetId.current) {
-            // Already rendered
-            return;
-        }
+        isRendering.current = true;
         
         try {
             widgetId.current = window.turnstile.render(containerRef.current, {
                 sitekey: siteKey,
                 callback: (token: string) => {
-                    if (token) {
-                        onSolved({ type: 'turnstile', value: token });
+                    if (token && !hasCalledCallback.current) {
+                        console.log('[Turnstile] Token received');
+                        handleSolved({ type: 'turnstile', value: token });
                     }
                 },
                 'error-callback': (error: any) => {
                     console.warn('[Turnstile] Error callback:', error);
-                    setUseFallback(true);
                     if (widgetId.current && window.turnstile) {
-                        window.turnstile.remove(widgetId.current);
+                        try {
+                            window.turnstile.remove(widgetId.current);
+                        } catch (e) {
+                            console.error('[Turnstile] Error removing on error:', e);
+                        }
                         widgetId.current = null;
                     }
+                    isRendering.current = false;
+                    setUseFallback(true);
                 },
                 'expired-callback': () => {
                     console.warn('[Turnstile] Token expired');
-                    onSolved({ type: 'turnstile', value: '' });
+                    hasCalledCallback.current = false;
+                    if (widgetId.current && window.turnstile) {
+                        try {
+                            window.turnstile.reset(widgetId.current);
+                        } catch (e) {
+                            console.error('[Turnstile] Error resetting:', e);
+                        }
+                    }
                 },
             });
             console.log('[Turnstile] Widget rendered successfully');
+            isRendering.current = false;
         } catch (error) {
             console.error('[Turnstile] Render error:', error);
+            isRendering.current = false;
             setUseFallback(true);
         }
     };
@@ -89,7 +119,6 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
             script.async = true;
             script.defer = true;
             script.onload = () => {
-                scriptLoaded = true;
                 renderTurnstile();
             };
             script.onerror = () => {
@@ -101,12 +130,12 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
             // Script exists, check if it's already loaded or wait for it
             if (window.turnstile) {
                 // Already loaded
-                scriptLoaded = true;
                 renderTurnstile();
             } else {
                 // Wait for script to load
+                const existingOnLoad = script.onload;
                 script.onload = () => {
-                    scriptLoaded = true;
+                    if (existingOnLoad) existingOnLoad.call(script);
                     renderTurnstile();
                 };
                 script.onerror = () => {
@@ -125,15 +154,17 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
                 console.error('[Turnstile] Error removing widget:', error);
             }
             widgetId.current = null;
+            isRendering.current = false;
+            hasCalledCallback.current = false;
         }
     };
-  }, [siteKey, onSolved]);
+  }, [siteKey, handleSolved]);
 
   useEffect(() => {
-    if (useFallback) {
-      onSolved({ type: 'fallbackEmoji', value: '' });
+    if (useFallback && !hasCalledCallback.current) {
+      handleSolved({ type: 'fallbackEmoji', value: '' });
     }
-  }, [useFallback, onSolved]);
+  }, [useFallback, handleSolved]);
 
   if (useFallback) {
     const fallbackMessage = fallbackText.includes('{emoji}')
