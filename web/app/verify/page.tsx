@@ -317,24 +317,26 @@ export default function VerifyPage() {
                             siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ''}
                             fallbackText={t.captchaFallback}
                             onSolved={(res) => {
-                                if (!res.value) return;
-                                if (res.type === 'fallbackEmoji' && res.value !== 'ok') {
-                                  setStatusMsg(t.verifyFailed);
-                                  return;
-                                }
-                                setCaptchaResult(res);
-                                handleVerify(res);
-                            }} 
+  if (!res.value) return;
+
+  if (res.type === "fallbackEmoji" && res.value !== "ok") {
+    setStatusMsg(t.verifyFailed);
+    return;
+  }
+
+  setCaptchaResult(res);
+}}
                         />
                     </div>
 
                     {captchaResult && (
-                         <button 
-                            onClick={handleVerify}
-                            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/20 hover:scale-[1.02] active:scale-95 transition-all"
-                        >
-                            {t.button}
-                        </button>
+                         <button
+  onClick={() => handleVerify()}
+  disabled={!captchaResult}
+  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
+>
+  {t.button}
+</button>
                     )}
                     
                     <button onClick={() => setStep(0)} className="w-full text-xs text-slate-500 hover:text-slate-300 transition">
