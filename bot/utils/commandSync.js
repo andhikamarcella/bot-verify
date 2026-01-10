@@ -55,6 +55,85 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function buildDiscordApiUrl(route) {
+  const normalized = String(route || '');
+  const base = String(process.env.DISCORD_API_BASE_URL || 'https://discord.com/api/v10').replace(/\/$/, '');
+  if (!normalized.startsWith('/')) {
+    return `${base}/${normalized}`;
+  }
+  return `${base}${normalized}`;
+}
+
+async function fetchDiscordApi(method, route, options, label, signal) {
+  if (typeof fetch !== 'function') {
+    throw new Error(`fetch-not-available:${label}`);
+  }
+  const token = process.env.DISCORD_TOKEN;
+  if (!token) {
+    throw new Error(`missing-discord-token:${label}`);
+  }
+
+  const url = buildDiscordApiUrl(route);
+  const rawBody = options?.body;
+  const hasBody = rawBody !== undefined && rawBody !== null && !['get', 'delete'].includes(String(method || '').toLowerCase());
+  const body = hasBody ? JSON.stringify(rawBody) : undefined;
+
+  while (true) {
+    const res = await fetch(url, {
+      method: String(method || '').toUpperCase(),
+      headers: {
+        Authorization: `Bot ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body,
+      signal,
+    });
+
+    const limit = res.headers.get('x-ratelimit-limit');
+    const remaining = res.headers.get('x-ratelimit-remaining');
+    const resetAfter = res.headers.get('x-ratelimit-reset-after');
+    if (limit || remaining || resetAfter) {
+      console.log(
+        `📶 Discord rate window: limit=${limit ?? '?'} remaining=${remaining ?? '?'} resetAfter=${resetAfter ?? '?'}s • ${String(method || '').toUpperCase()} ${route}`
+      );
+    }
+
+    if (res.status === 429) {
+      const json = await res.json().catch(() => null);
+      const retryAfterSeconds = Number(json?.retry_after);
+      const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? Math.ceil(retryAfterSeconds * 1000) : 1000;
+      const isGlobal = Boolean(json?.global);
+      console.warn(
+        `🛑 Discord rate limit${isGlobal ? ' (GLOBAL)' : ''}: ${String(method || '').toUpperCase()} ${route} • wait=${retryAfterMs}ms`
+      );
+      await sleep(retryAfterMs);
+      continue;
+    }
+
+    if (res.status === 204) {
+      return null;
+    }
+
+    const text = await res.text().catch(() => '');
+    let json = null;
+    if (text) {
+      try {
+        json = JSON.parse(text);
+      } catch (error) {
+        if (!res.ok) {
+          throw new Error(`Discord HTTP ${res.status}`);
+        }
+        return text;
+      }
+    }
+    if (!res.ok) {
+      const message = json?.message || json?.error?.message || `Discord HTTP ${res.status}`;
+      throw new Error(message);
+    }
+    return json;
+  }
+}
+
 function withTimeout(promise, label) {
   const normalizedLabel = String(label || '').toLowerCase();
   if (normalizedLabel.includes('command guild')) {
@@ -108,6 +187,8 @@ async function restCall(rest, method, route, options, label) {
   const heartbeatMs = Number.isFinite(heartbeatRaw) && heartbeatRaw > 0 ? heartbeatRaw : null;
 
   const isGuildCommandOp = shouldBypassTimeout(label, route);
+  const useDirectFetch =
+    isGuildCommandOp && typeof fetch === 'function' && String(process.env.DISCORD_DIRECT_FETCH || 'true') !== 'false';
   const maxAttempts = isGuildCommandOp ? Math.max(1, REST_RETRIES + 1) : 1;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -123,16 +204,41 @@ async function restCall(rest, method, route, options, label) {
         }, heartbeatMs);
       }
 
-      const callPromise = rest[method](route, options);
-      const guarded = isGuildCommandOp ? withHardTimeout(callPromise, attemptLabel) : withTimeout(callPromise, attemptLabel);
-      const result = await guarded;
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      let abortTimer = null;
+      if (controller && REST_HARD_TIMEOUT_MS) {
+        abortTimer = setTimeout(() => {
+          try {
+            controller.abort();
+          } catch (_) {
+            null;
+          }
+        }, REST_HARD_TIMEOUT_MS);
+      }
 
-      const elapsed = Date.now() - startedAt;
-      console.log(`✅ ${attemptLabel} (${elapsed}ms)`);
-      return result;
+      try {
+        const callPromise = useDirectFetch
+          ? fetchDiscordApi(method, route, options, attemptLabel, controller?.signal)
+          : rest[method](route, options);
+        const guarded = useDirectFetch
+          ? withHardTimeout(callPromise, attemptLabel)
+          : isGuildCommandOp
+            ? withHardTimeout(callPromise, attemptLabel)
+            : withTimeout(callPromise, attemptLabel);
+        const result = await guarded;
+
+        const elapsed = Date.now() - startedAt;
+        console.log(`✅ ${attemptLabel} (${elapsed}ms)`);
+        return result;
+      } finally {
+        if (abortTimer) {
+          clearTimeout(abortTimer);
+        }
+      }
     } catch (error) {
       const elapsed = Date.now() - startedAt;
-      console.warn(`❌ ${attemptLabel} gagal (${elapsed}ms): ${error?.message || error}`);
+      const msg = error?.name === 'AbortError' ? 'aborted' : error?.message || error;
+      console.warn(`❌ ${attemptLabel} gagal (${elapsed}ms): ${msg}`);
       if (attempt < maxAttempts) {
         const backoffMs = Math.min(15000, 2000 * attempt);
         console.warn(`🔁 Retry dalam ${backoffMs}ms...`);
@@ -260,13 +366,19 @@ async function clearGuildCommands(rest, clientId, guildId) {
   const remaining = await restCall(rest, 'get', guildRoute, undefined, `Cek sisa command guild ${guildId}`);
   if (Array.isArray(remaining) && remaining.length > 0) {
     for (const command of remaining) {
-      await restCall(
-        rest,
-        'delete',
-        Routes.applicationGuildCommand(clientId, guildId, command.id),
-        undefined,
-        `Hapus command guild ${command.name}`
-      );
+      try {
+        await restCall(
+          rest,
+          'delete',
+          Routes.applicationGuildCommand(clientId, guildId, command.id),
+          undefined,
+          `Hapus command guild ${command.name}`
+        );
+      } catch (error) {
+        console.warn(
+          `⚠️  Gagal menghapus command guild ${command?.name || command?.id}: ${error?.message || error}`
+        );
+      }
     }
   }
 }
@@ -290,13 +402,19 @@ async function removeDuplicateGuildCommands(rest, clientId, guildId) {
     return;
   }
   for (const command of duplicates) {
-    await restCall(
-      rest,
-      'delete',
-      Routes.applicationGuildCommand(clientId, guildId, command.id),
-      undefined,
-      `Hapus duplicate command guild ${command.name}`
-    );
+    try {
+      await restCall(
+        rest,
+        'delete',
+        Routes.applicationGuildCommand(clientId, guildId, command.id),
+        undefined,
+        `Hapus duplicate command guild ${command.name}`
+      );
+    } catch (error) {
+      console.warn(
+        `⚠️  Gagal menghapus duplicate command guild ${command?.name || command?.id}: ${error?.message || error}`
+      );
+    }
   }
   console.warn(
     `⚠️  Duplicate slash command dihapus: ${duplicates.map((cmd) => cmd.name).join(', ')}`
@@ -317,36 +435,58 @@ async function syncGuildCommandsIndividually(rest, clientId, guildId, payload) {
 
   const desiredNames = new Set(payload.map((cmd) => cmd.name));
 
+  const failures = [];
   for (let index = 0; index < payload.length; index += 1) {
     const cmd = payload[index];
     console.log(`🛠️  Sync command guild [${index + 1}/${payload.length}]: ${cmd.name}`);
     const found = existingByName.get(cmd.name);
-    if (found?.id) {
-      await restCall(
-        rest,
-        'patch',
-        Routes.applicationGuildCommand(clientId, guildId, found.id),
-        { body: cmd },
-        `Update command guild ${cmd.name}`
-      );
-    } else {
-      await restCall(rest, 'post', guildRoute, { body: cmd }, `Buat command guild ${cmd.name}`);
+    try {
+      if (found?.id) {
+        await restCall(
+          rest,
+          'patch',
+          Routes.applicationGuildCommand(clientId, guildId, found.id),
+          { body: cmd },
+          `Update command guild ${cmd.name}`
+        );
+      } else {
+        await restCall(rest, 'post', guildRoute, { body: cmd }, `Buat command guild ${cmd.name}`);
+      }
+    } catch (error) {
+      failures.push({ name: cmd.name, message: error?.message || String(error) });
+      console.warn(`⚠️  Sync command guild ${cmd.name} gagal: ${error?.message || error}`);
+    } finally {
+      await sleep(COMMAND_SYNC_DELAY_MS);
     }
-    await sleep(COMMAND_SYNC_DELAY_MS);
+  }
+
+  if (failures.length) {
+    console.warn(
+      `⚠️  Sebagian command gagal di-sync (${failures.length}/${payload.length}): ${failures
+        .map((f) => f.name)
+        .join(', ')}`
+    );
   }
 
   if (Array.isArray(existing)) {
     for (const cmd of existing) {
       if (!cmd?.id || !cmd?.name) continue;
       if (!desiredNames.has(cmd.name)) {
-        await restCall(
-          rest,
-          'delete',
-          Routes.applicationGuildCommand(clientId, guildId, cmd.id),
-          undefined,
-          `Hapus command guild ${cmd.name}`
-        );
-        await sleep(COMMAND_SYNC_DELAY_MS);
+        try {
+          await restCall(
+            rest,
+            'delete',
+            Routes.applicationGuildCommand(clientId, guildId, cmd.id),
+            undefined,
+            `Hapus command guild ${cmd.name}`
+          );
+        } catch (error) {
+          console.warn(
+            `⚠️  Gagal menghapus command guild ${cmd?.name || cmd?.id}: ${error?.message || error}`
+          );
+        } finally {
+          await sleep(COMMAND_SYNC_DELAY_MS);
+        }
       }
     }
   }
