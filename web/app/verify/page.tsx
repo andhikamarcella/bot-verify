@@ -398,13 +398,12 @@ export default function VerifyPage() {
         onAgree={() => setAgreedTerms(true)}
         content={
             <div className="space-y-4">
-                <p><strong>1. Introduction</strong><br/>Welcome to {guildName}. By verifying, you agree to these terms.</p>
-                <p><strong>2. User Conduct</strong><br/>You agree not to spam, raid, or harass other members. Multiple accounts are strictly prohibited.</p>
-                <p><strong>3. Bot Usage</strong><br/>Our verification bot collects your Discord ID and IP address (hashed) for security purposes.</p>
-                <p><strong>4. Termination</strong><br/>Admins reserve the right to revoke your verified status at any time.</p>
-                <p><strong>5. Liability</strong><br/>We are not responsible for any issues arising from Discord API downtimes.</p>
-                <p><strong>6. Updates</strong><br/>These terms may change at any time.</p>
-                <p><strong>7. Final Agreement</strong><br/>By clicking "I Understand", you confirm you are human and eligible to join.</p>
+                {t.termsContent.map((item, index) => (
+                    <p key={index}>
+                        <strong>{item.title}</strong><br/>
+                        {item.text.replace('{guildName}', guildName)}
+                    </p>
+                ))}
                 <div className="h-32"></div>
             </div>
         } 
@@ -419,13 +418,12 @@ export default function VerifyPage() {
         onAgree={() => setAgreedPrivacy(true)}
         content={
             <div className="space-y-4">
-                <p><strong>1. Data Collection</strong><br/>We collect your Discord User ID, Username, and IP Address.</p>
-                <p><strong>2. Purpose</strong><br/>This data is used solely for verification and anti-abuse measures.</p>
-                <p><strong>3. Data Retention</strong><br/>Verification logs are stored for 30 days and then anonymized.</p>
-                <p><strong>4. Third Parties</strong><br/>We use Cloudflare Turnstile for CAPTCHA, which may collect device info.</p>
-                <p><strong>5. Your Rights</strong><br/>You can request data deletion by contacting the server owner.</p>
-                <p><strong>6. Cookies</strong><br/>We use local storage to save your language preference.</p>
-                <p><strong>7. Contact</strong><br/>For privacy concerns, reach out to staff.</p>
+                {t.privacyContent.map((item, index) => (
+                    <p key={index}>
+                        <strong>{item.title}</strong><br/>
+                        {item.text}
+                    </p>
+                ))}
                 <div className="h-32"></div>
             </div>
         } 
