@@ -470,6 +470,32 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (!interaction.isChatInputCommand()) return;
+
+    if (interaction.inGuild?.() && interaction.guild && interaction.member) {
+      let hasNonEveryoneRole = true;
+      const roles = interaction.member.roles;
+      if (roles?.cache) {
+        hasNonEveryoneRole = roles.cache.some((role) => role && role.id && role.id !== interaction.guild.id);
+      } else if (Array.isArray(roles)) {
+        hasNonEveryoneRole = roles.length > 0;
+      }
+
+      if (!hasNonEveryoneRole) {
+        const group = interaction.options.getSubcommandGroup(false);
+        const sub = interaction.options.getSubcommand(false);
+        const isVerifyStart =
+          interaction.commandName === 'verify' && !group && (!sub || sub === 'start');
+
+        if (!isVerifyStart) {
+          await interaction.reply({
+            content: 'Kamu belum punya role. Silakan jalankan `/verify start` dulu untuk verifikasi.',
+            flags: 64,
+          });
+          return;
+        }
+      }
+    }
+
     const command = client.commands.get(interaction.commandName);
     if (!command) return;
     await command.execute(interaction, client);
