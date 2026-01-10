@@ -121,46 +121,47 @@ export default function VerifyPage() {
       return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  async function handleVerify(nextCaptchaResult?: { type: "turnstile" | "fallbackEmoji"; value: string }) {
-    const effectiveCaptcha = nextCaptchaResult || captchaResult;
-    if (!token || !effectiveCaptcha) return;
-    
-    setStep(2); // Processing
-    setStatusMsg(t.verifying);
+  async function handleVerify() {
+  if (!token || !captchaResult) return;
 
-    const body = {
-      token,
-      captchaResult: effectiveCaptcha,
-      ip: "0.0.0.0", // Server will detect actual IP
-    };
+  setStep(2);
+  setStatusMsg(t.verifying);
 
-    try {
-      const res = await fetch((process.env.NEXT_PUBLIC_API_BASE_URL || "") + "/api/verify", {
+  const body = {
+    token,
+    captchaResult,
+    ip: "0.0.0.0",
+  };
+
+  try {
+    const res = await fetch(
+      (process.env.NEXT_PUBLIC_API_BASE_URL || "") + "/api/verify",
+      {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      });
-
-      const data: VerifyResponse = await res.json();
-
-      if (data.ok) {
-        setStep(3); // Done
-        setStatusMsg(t.successMessage);
-        // Confetti effect can be triggered here if we had the lib
-      } else {
-        setStep(1); // Back to captcha
-        if (data.error === 'maintenance-mode') {
-             setStatusMsg(`${t.envCheck.maintenance}: ${data.reason}`);
-        } else {
-             setStatusMsg(t.verifyFailed + (data.error ? ` (${data.error})` : ''));
-        }
       }
-    } catch (error) {
-      console.error(error);
+    );
+
+    const data: VerifyResponse = await res.json();
+
+    if (data.ok) {
+      setStep(3);
+      setStatusMsg(t.successMessage);
+    } else {
       setStep(1);
-      setStatusMsg(t.errors.apiTimeout);
+      setStatusMsg(
+        data.error === "maintenance-mode"
+          ? `${t.envCheck.maintenance}: ${data.reason}`
+          : t.verifyFailed + (data.error ? ` (${data.error})` : "")
+      );
     }
+  } catch (err) {
+    console.error(err);
+    setStep(1);
+    setStatusMsg(t.errors.apiTimeout);
   }
+}
 
   // --- UI Renders ---
 
