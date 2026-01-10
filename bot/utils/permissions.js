@@ -16,23 +16,6 @@ function isStaff(interaction) {
     return true;
   }
 
-  const memberHighestRole = interaction.member?.roles?.highest;
-  const guildRoles = interaction.guild?.roles?.cache;
-  if (memberHighestRole && guildRoles) {
-    let guildHighestManualRole = null;
-    for (const role of guildRoles.values()) {
-      if (role.managed) continue;
-      if (interaction.guild?.id && role.id === interaction.guild.id) continue;
-      if (!guildHighestManualRole || role.position > guildHighestManualRole.position) {
-        guildHighestManualRole = role;
-      }
-    }
-
-    if (guildHighestManualRole && memberHighestRole.position >= guildHighestManualRole.position) {
-      return true;
-    }
-  }
-
   if (
     interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
     interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
@@ -40,13 +23,13 @@ function isStaff(interaction) {
     return true;
   }
 
-  const staffRoleId = process.env.STAFF_ROLE_ID || process.env.ADMIN_ROLE_ID;
-  if (staffRoleId) {
-    if (interaction.member?.roles?.cache?.has?.(staffRoleId)) {
-      return true;
-    }
-    if (hasAtLeastRole(interaction.member, staffRoleId)) {
-      return true;
+  const staffRoleIds = [process.env.STAFF_ROLE_ID, process.env.ADMIN_ROLE_ID].filter(Boolean);
+  if (staffRoleIds.length) {
+    const cache = interaction.member?.roles?.cache;
+    const list = interaction.member?.roles;
+    for (const roleId of staffRoleIds) {
+      if (cache?.has?.(roleId)) return true;
+      if (Array.isArray(list) && list.includes(roleId)) return true;
     }
   }
 
