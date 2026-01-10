@@ -22,6 +22,12 @@ module.exports = {
             '`/verify debug` • Diagnosa cepat konfigurasi bot',
         },
         {
+          name: 'Fitur Member',
+          value:
+            '`/profile` • Ringkasan status verifikasi & risk kamu\n' +
+            '`/mystats` • Riwayat verifikasi kamu',
+        },
+        {
           name: 'Pengaturan Server',
           value:
             '`/settings show` • Lihat konfigurasi saat ini\n' +
