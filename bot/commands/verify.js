@@ -25,6 +25,7 @@ const { getUserProfile, clearUserVerification } = require('../../api/models/User
 const { insertHistoryEntry, getHistoryForUser } = require('../../api/models/VerificationHistory');
 const { sendVerificationLog } = require('../utils/logging');
 const { describeRisk } = require('../../api/lib/riskScore');
+const { getBlacklistEntry } = require('../../api/models/BlacklistedUsers');
 const {
   ensureStaff,
   isStaff,
@@ -46,7 +47,7 @@ async function sendVerificationDm(user, url) {
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setLabel('Verify Me').setStyle(ButtonStyle.Link).setURL(url)
   );
-  await user.send({
+  const message = await user.send({
     content: [
       'Halo! Klik tombol di bawah untuk memulai verifikasi.',
       '',
@@ -55,9 +56,29 @@ async function sendVerificationDm(user, url) {
     ].join('\n'),
     components: [row],
   });
+  return message;
 }
 
 async function handleStart(interaction) {
+  const blacklistEntry = await getBlacklistEntry(interaction.user.id, interaction.guildId).catch(() => null);
+  if (blacklistEntry) {
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (member) {
+      await member.kick(`Blacklisted: ${blacklistEntry.reason || 'unspecified'}`).catch(() => {});
+    }
+    try {
+      if (typeof interaction.deferUpdate === 'function' && interaction.isButton?.()) {
+        await interaction.deferUpdate().catch(() => {});
+      } else {
+        await interaction.reply({ content: ' ', flags: 64 });
+        await interaction.deleteReply().catch(() => {});
+      }
+    } catch (_) {
+      // ignore
+    }
+    return;
+  }
+
   if (!FRONTEND_BASE) {
     await interaction.reply({
       content: 'Konfigurasi FRONTEND belum tersedia. Hubungi admin.',
@@ -93,7 +114,13 @@ async function handleStart(interaction) {
   const verifyUrl = `${FRONTEND_BASE}/verify?token=${token}`;
 
   try {
-    await sendVerificationDm(interaction.user, verifyUrl);
+    const dmMessage = await sendVerificationDm(interaction.user, verifyUrl);
+    if (dmMessage?.channel?.id && dmMessage?.id) {
+      await setTokenStatus(token, 'PENDING', {
+        dmChannelId: dmMessage.channel.id,
+        dmMessageId: dmMessage.id,
+      }).catch(() => {});
+    }
   } catch (err) {
     console.error('Gagal mengirim DM verifikasi', err);
     await interaction.reply({
