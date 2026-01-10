@@ -18,6 +18,8 @@ async function createTokenDocument(doc) {
     extraRolesEligible: doc.extraRolesEligible || [],
     createdAt: doc.createdAt || new Date(),
     verifiedAt: doc.verifiedAt || null,
+    dmChannelId: doc.dmChannelId || null,
+    dmMessageId: doc.dmMessageId || null,
     boundIp: null, // Initial bound IP is null
   };
   await collection.insertOne(payload);
@@ -65,6 +67,20 @@ async function listRecentVerified(limit = 50) {
     .toArray();
 }
 
+async function listDmMessagesForUser(userId, guildId, limit = 25) {
+  const collection = await getCollection();
+  return collection
+    .find({
+      userId,
+      guildId,
+      dmChannelId: { $ne: null },
+      dmMessageId: { $ne: null },
+    })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .toArray();
+}
+
 module.exports = {
   createTokenDocument,
   findToken,
@@ -72,4 +88,5 @@ module.exports = {
   setTokenStatus,
   listRecentVerified,
   bindIpToToken,
+  listDmMessagesForUser,
 };
