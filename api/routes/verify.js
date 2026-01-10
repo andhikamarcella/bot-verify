@@ -216,38 +216,68 @@ router.post('/verify', async (req, res) => {
 
     // Turnstile Verification
     let captchaOk = false;
+    let captchaError = null;
+    
     console.log('[Verify] Starting captcha validation', {
       type: captchaResult?.type,
       hasValue: !!captchaResult?.value,
       valueLength: captchaResult?.value?.length,
       hasSecretKey: !!TURNSTILE_SECRET_KEY,
       secretKeyLength: TURNSTILE_SECRET_KEY?.length,
-      ip: bodyIp || req.ip
+      secretKeyPrefix: TURNSTILE_SECRET_KEY ? TURNSTILE_SECRET_KEY.substring(0, 15) + '...' : 'MISSING',
+      ip: bodyIp || req.ip,
+      userAgent: req.get('user-agent')?.substring(0, 50)
     });
 
     if (captchaResult?.type === 'turnstile') {
       if (!captchaResult.value || captchaResult.value.trim() === '') {
         console.error('[Verify] Turnstile token is empty');
+        captchaError = 'Token is empty';
         captchaOk = false;
       } else if (!TURNSTILE_SECRET_KEY || TURNSTILE_SECRET_KEY.trim() === '') {
-        console.error('[Verify] TURNSTILE_SECRET_KEY is not set');
+        console.error('[Verify] TURNSTILE_SECRET_KEY is not set in environment variables!');
+        console.error('[Verify] Please check your Railway/Vercel environment variables');
+        captchaError = 'Secret key not configured';
+        captchaOk = false;
+      } else if (TURNSTILE_SECRET_KEY.length < 20) {
+        console.error('[Verify] TURNSTILE_SECRET_KEY seems too short:', TURNSTILE_SECRET_KEY.length);
+        captchaError = 'Secret key invalid format';
         captchaOk = false;
       } else {
+        console.log('[Verify] Calling verifyTurnstile with token length:', captchaResult.value.length);
         captchaOk = await verifyTurnstile(captchaResult.value, TURNSTILE_SECRET_KEY, bodyIp || req.ip);
+        if (!captchaOk) {
+          captchaError = 'Cloudflare validation failed';
+        }
       }
     } else if (captchaResult?.type === 'fallbackEmoji') {
-      // Keep fallback just in case or disable it if strict
-      captchaOk = captchaResult.value === 'ok';
-      console.log('[Verify] Using fallback emoji captcha', { ok: captchaOk });
+      // Check if strict mode is enabled
+      const TURNSTILE_STRICT = process.env.TURNSTILE_STRICT === 'true';
+      if (TURNSTILE_STRICT) {
+        console.error('[Verify] TURNSTILE_STRICT is enabled, fallback emoji not allowed');
+        captchaError = 'Turnstile required (strict mode)';
+        captchaOk = false;
+      } else {
+        captchaOk = captchaResult.value === 'ok';
+        console.log('[Verify] Using fallback emoji captcha', { ok: captchaOk });
+      }
     } else {
       console.error('[Verify] Unknown captcha type:', captchaResult?.type);
+      captchaError = 'Unknown captcha type';
       captchaOk = false;
     }
 
-    console.log('[Verify] Captcha validation result:', captchaOk);
+    console.log('[Verify] Captcha validation result:', { 
+      ok: captchaOk, 
+      error: captchaError,
+      type: captchaResult?.type 
+    });
 
     if (!captchaOk) {
-      await setTokenStatus(token, 'FAILED', { failureReason: 'captcha' });
+      const failureReason = captchaError || 'captcha validation failed';
+      console.error('[Verify] Captcha validation failed:', failureReason);
+      
+      await setTokenStatus(token, 'FAILED', { failureReason: 'captcha', details: captchaError });
       await insertLog({
         userId: record.userId,
         guildId: record.guildId,
@@ -271,9 +301,13 @@ router.post('/verify', async (req, res) => {
         status: 'FAILED',
         riskScore: profile?.riskScore ?? 0,
         suspectReasons,
-        reason: 'Captcha validation failed',
+        reason: `Captcha validation failed: ${failureReason}`,
       });
-      return res.status(400).json({ ok: false, error: 'captcha-invalid' });
+      return res.status(400).json({ 
+        ok: false, 
+        error: 'captcha-invalid',
+        reason: captchaError || 'Captcha validation failed'
+      });
     }
 
     const guild = await client.guilds.fetch(GUILD_ID);
