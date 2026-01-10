@@ -1,6 +1,5 @@
 const {
   SlashCommandBuilder,
-  PermissionFlagsBits,
   EmbedBuilder,
 } = require('discord.js');
 const {
@@ -13,11 +12,10 @@ const { computeRiskScore, describeRisk } = require('../../api/lib/riskScore');
 const { insertHistoryEntry } = require('../../api/models/VerificationHistory');
 const { fetchConfig } = require('../utils/guildConfig');
 const { sendVerificationLog } = require('../utils/logging');
+const { ensureStaff } = require('../utils/permissions');
 
 function ensureAdmin(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    throw new Error('no-permission');
-  }
+  ensureStaff(interaction);
 }
 
 function accountAgeDaysFrom(profile, member, user) {
