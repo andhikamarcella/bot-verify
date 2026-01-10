@@ -41,8 +41,13 @@ function isStaff(interaction) {
   }
 
   const staffRoleId = process.env.STAFF_ROLE_ID || process.env.ADMIN_ROLE_ID;
-  if (staffRoleId && hasAtLeastRole(interaction.member, staffRoleId)) {
-    return true;
+  if (staffRoleId) {
+    if (interaction.member?.roles?.cache?.has?.(staffRoleId)) {
+      return true;
+    }
+    if (hasAtLeastRole(interaction.member, staffRoleId)) {
+      return true;
+    }
   }
 
   return false;
