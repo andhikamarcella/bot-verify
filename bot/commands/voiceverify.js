@@ -24,6 +24,10 @@ const DEFAULT_TTS_VOICE = process.env.GROQ_TTS_VOICE || 'troy';
 
 const sessions = new Map();
 
+if (!globalThis.__voiceConnections) {
+  globalThis.__voiceConnections = new Map();
+}
+
 function randomDigits(count) {
   const n = Math.max(3, Math.min(6, Number(count) || 3));
   let out = '';
@@ -212,6 +216,14 @@ async function cleanupSession(key) {
     null;
   }
   try {
+    const map = globalThis.__voiceConnections;
+    if (map && session.guildId && map.get(session.guildId) === session.connection) {
+      map.delete(session.guildId);
+    }
+  } catch (_) {
+    null;
+  }
+  try {
     if (session.tmpPath && fs.existsSync(session.tmpPath)) {
       fs.unlinkSync(session.tmpPath);
     }
@@ -286,7 +298,12 @@ module.exports = {
       selfMute: false,
     });
 
-    sessions.set(key, { connection, tmpPath, attempts: 0, code });
+    sessions.set(key, { connection, tmpPath, attempts: 0, code, guildId: guild.id });
+    try {
+      globalThis.__voiceConnections.set(guild.id, connection);
+    } catch (_) {
+      null;
+    }
 
     await interaction.deferReply({ flags: 64 });
 
