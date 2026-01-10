@@ -85,7 +85,7 @@ export function PolicyModal({ isOpen, onClose, title, content, onAgree, agreeTex
                 <div 
                     ref={contentRef}
                     onScroll={handleScroll}
-                    className="mt-2 flex-1 min-h-0 overflow-y-auto pr-2 text-slate-300 text-sm space-y-4 border-b border-slate-700 pb-2"
+                    className="mt-2 max-h-[55vh] overflow-y-auto pr-2 text-slate-300 text-sm space-y-4"
                 >
                   {content}
                 </div>
