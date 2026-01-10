@@ -33,6 +33,7 @@ const { getBlacklistEntry } = require('../api/models/BlacklistedUsers');
 const {
   createTokenDocument,
   findLatestByUser,
+  setTokenStatus,
 } = require('../api/models/Tokens');
 const { getExtraRolesForUser } = require('../api/lib/roleSync');
 const { computeRiskScore } = require('../api/lib/riskScore');
@@ -55,6 +56,26 @@ const presenceMessages = [
   'Need help? Try /help',
   'Join support: discord.gg/w3ENr2uEeH',
 ];
+
+const gamePresenceMessages = [
+  'Elden Ring',
+  'Dark Souls',
+  'The Elder Scrolls',
+];
+
+let presenceMode = process.env.PRESENCE_MODE || 'default';
+
+function getPresenceMode() {
+  return presenceMode;
+}
+
+function setPresenceMode(mode) {
+  const normalized = String(mode || '').toLowerCase();
+  if (normalized !== 'default' && normalized !== 'games') {
+    throw new Error('invalid-presence-mode');
+  }
+  presenceMode = normalized;
+}
 
 function reminderKey(guildId, userId) {
   return `${guildId || GUILD_ID}:${userId}`;
@@ -170,6 +191,12 @@ async function scheduleReminder(member) {
       if (verified) {
         return;
       }
+
+      const blacklistEntry = await getBlacklistEntry(member.id, member.guild.id);
+      if (blacklistEntry) {
+        return;
+      }
+
       if (!FRONTEND_URL) {
         await member.send('Hai! Jalankan perintah /verify start di server untuk mendapatkan tautan verifikasi.');
         return;
@@ -199,7 +226,7 @@ async function scheduleReminder(member) {
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setLabel('Verify Me').setStyle(ButtonStyle.Link).setURL(verificationUrl)
       );
-      await member.send({
+      const dmMessage = await member.send({
         content: [
           `Hai ${member.user.username}!`,
           'Kami belum mendeteksi bahwa kamu sudah diverifikasi.',
@@ -209,6 +236,13 @@ async function scheduleReminder(member) {
         ].join('\n'),
         components: [row],
       });
+
+      if (dmMessage?.channel?.id && dmMessage?.id) {
+        await setTokenStatus(tokenDoc.token, 'PENDING', {
+          dmChannelId: dmMessage.channel.id,
+          dmMessageId: dmMessage.id,
+        }).catch(() => {});
+      }
     } catch (error) {
       console.warn('Gagal mengirim pengingat verifikasi:', error?.message);
     }
@@ -376,26 +410,28 @@ client.once(Events.ClientReady, () => {
 
   let presenceIndex = 0;
   const applyPresence = () => {
-    const message = presenceMessages[presenceIndex % presenceMessages.length];
+    const pool = presenceMode === 'games' ? gamePresenceMessages : presenceMessages;
+    const message = pool[presenceIndex % pool.length];
+
     const activity = {
       name: message,
       type: ActivityType.Playing,
-      // Buttons require the invite URL to be registered under Activity URL Mapping in the
-      // Discord Developer Portal for this application.
-      buttons: ['Join Support Server'],
-      metadata: { button_urls: [SUPPORT_INVITE_URL] },
-      url: SUPPORT_INVITE_URL,
     };
 
-    if (process.env.DISCORD_CLIENT_ID) {
-      activity.applicationId = process.env.DISCORD_CLIENT_ID;
+    if (presenceMode !== 'games') {
+      activity.buttons = ['Join Support Server'];
+      activity.metadata = { button_urls: [SUPPORT_INVITE_URL] };
+      activity.url = SUPPORT_INVITE_URL;
+      if (process.env.DISCORD_CLIENT_ID) {
+        activity.applicationId = process.env.DISCORD_CLIENT_ID;
+      }
     }
 
     client.user.setPresence({
       activities: [activity],
       status: 'online',
     });
-    presenceIndex = (presenceIndex + 1) % presenceMessages.length;
+    presenceIndex = (presenceIndex + 1) % pool.length;
   };
 
   applyPresence();
@@ -459,4 +495,6 @@ module.exports = {
   client,
   registerRecentVerification,
   cancelReminder,
+  getPresenceMode,
+  setPresenceMode,
 };
