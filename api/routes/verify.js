@@ -108,11 +108,30 @@ router.get('/pre-check', async (req, res) => {
             await bindIpToToken(token, currentIpHash);
         }
 
+        let nicknameSuggestions = [];
+        try {
+          const guild = await client.guilds.fetch(record.guildId);
+          const member = await guild.members.fetch(record.userId).catch(() => null);
+          const user = member?.user || (await client.users.fetch(record.userId).catch(() => null));
+          const candidates = [
+            member?.displayName,
+            user?.globalName,
+            user?.username,
+          ]
+            .map((v) => (typeof v === 'string' ? v.trim() : ''))
+            .filter(Boolean)
+            .map((v) => v.replace(/\s+/g, ' ').trim().slice(0, 32));
+          nicknameSuggestions = Array.from(new Set(candidates));
+        } catch (_) {
+          nicknameSuggestions = [];
+        }
+
         return res.json({ 
             ok: true, 
             tokenValid: true, 
             expiresIn: Math.max(0, 15 * 60 * 1000 - (Date.now() - createdAt.getTime())),
-            envStatus
+            envStatus,
+            nicknameSuggestions,
         });
     }
 
@@ -380,6 +399,24 @@ router.post('/verify', async (req, res) => {
       }
     }
 
+    const requestedDisplayName =
+      submittedProfile && typeof submittedProfile === 'object' && typeof submittedProfile.displayName === 'string'
+        ? submittedProfile.displayName
+        : '';
+    const nicknameFromUser = String(requestedDisplayName || '')
+      .replace(/\s+/g, ' ')
+      .replace(/[\r\n\t]/g, ' ')
+      .trim()
+      .slice(0, 32);
+
+    if (nicknameFromUser) {
+      try {
+        await member.setNickname(nicknameFromUser, 'User provided nickname during verification');
+      } catch (nickError) {
+        console.warn('Failed to update nickname (user provided)', nickError?.message);
+      }
+    }
+
     if (WELCOME_CHANNEL_ID) {
       try {
         const channel = await guild.channels.fetch(WELCOME_CHANNEL_ID);
@@ -475,7 +512,7 @@ router.post('/verify', async (req, res) => {
       country: country || null,
     });
 
-    if (config.autoNickname) {
+    if (config.autoNickname && !nicknameFromUser) {
       const template = config.nicknameTemplate || '{{username}}';
       const context = {
         username: user.username,
