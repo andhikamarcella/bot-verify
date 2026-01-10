@@ -25,6 +25,11 @@ const { getUserProfile, clearUserVerification } = require('../../api/models/User
 const { insertHistoryEntry, getHistoryForUser } = require('../../api/models/VerificationHistory');
 const { sendVerificationLog } = require('../utils/logging');
 const { describeRisk } = require('../../api/lib/riskScore');
+const {
+  ensureStaff,
+  isStaff,
+  isMemberOrHigher,
+} = require('../utils/permissions');
 
 const FRONTEND_BASE = (process.env.PUBLIC_FRONTEND_URL || '').replace(/\/$/, '');
 const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;
@@ -34,9 +39,7 @@ async function ensureMongo() {
 }
 
 function ensureAdmin(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    throw new Error('no-permission');
-  }
+  ensureStaff(interaction);
 }
 
 async function sendVerificationDm(user, url) {
@@ -113,6 +116,8 @@ async function buildStatusEmbed(interaction, targetUserId) {
   const verificationProfile = await getVerificationProfile(targetUserId, interaction.guildId);
   const member = await interaction.guild.members.fetch(targetUserId).catch(() => null);
 
+  const nickname = member?.displayName || null;
+
   const riskScore = verificationProfile?.riskScore ?? 0;
   const riskInfo = describeRisk(riskScore);
 
@@ -121,6 +126,10 @@ async function buildStatusEmbed(interaction, targetUserId) {
     .setColor(
       riskInfo.label === 'HIGH' ? 0xed4245 : riskInfo.label === 'MEDIUM' ? 0xfaa61a : 0x57f287
     );
+
+  if (nickname) {
+    embed.addFields({ name: 'Nickname', value: nickname, inline: true });
+  }
 
   const accountCreatedAt =
     verificationProfile?.accountCreatedAt || member?.user?.createdAt || profile?.verifiedAt || null;
@@ -174,6 +183,10 @@ async function buildStatusEmbed(interaction, targetUserId) {
 
 async function handleStatus(interaction) {
   const target = interaction.options.getUser('target') || interaction.user;
+  if (target.id !== interaction.user.id && !isMemberOrHigher(interaction) && !isStaff(interaction)) {
+    await interaction.reply({ content: 'Kamu tidak punya izin untuk cek status user lain.', flags: 64 });
+    return;
+  }
   const embed = await buildStatusEmbed(interaction, target.id);
   await interaction.reply({ embeds: [embed], flags: 64 });
 }
