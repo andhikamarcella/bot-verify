@@ -189,17 +189,35 @@ async function syncGuildCommands(rest, clientId, guildId, manifest) {
   if (!Array.isArray(manifest) || manifest.length === 0) {
     return [];
   }
-  await clearGuildCommands(rest, clientId, guildId);
+
+  const onlyNamesRaw = process.env.COMMAND_SYNC_ONLY || '';
+  const onlyNames = new Set(
+    onlyNamesRaw
+      .split(',')
+      .map((v) => String(v || '').trim())
+      .filter(Boolean)
+  );
+
+  if (process.env.COMMAND_SYNC_SKIP_CLEAR !== 'true') {
+    await clearGuildCommands(rest, clientId, guildId);
+  } else {
+    console.warn(`⚠️  Melewati clear guild commands karena COMMAND_SYNC_SKIP_CLEAR=true`);
+  }
+
   const guildRoute = Routes.applicationGuildCommands(clientId, guildId);
   const payload = [];
   const seen = new Set();
   for (const entry of manifest) {
-    if (!entry?.json?.name) continue;
+    if (!entry?.json?.nanme) continue;
     if (seen.has(entry.json.name)) continue;
+    if (onlyNames.size > 0 && !onlyNames.has(entry.json.name)) continue;
     seen.add(entry.json.name);
     payload.push(entry.json);
   }
-  console.log(`🧾 Menyiapkan ${payload.length} command untuk guild ${guildId}...`);
+  const payloadBytes = Buffer.byteLength(JSON.stringify(payload), 'utf8');
+  console.log(
+    `🧾 Menyiapkan ${payload.length} command untuk guild ${guildId} (~${Math.round(payloadBytes / 1024)}KB)...`
+  );
   await restCall(rest, 'put', guildRoute, { body: payload }, `Pasang command guild ${guildId}`);
   await removeDuplicateGuildCommands(rest, clientId, guildId);
   return payload.map((item) => item.name);
