@@ -39,7 +39,8 @@ module.exports = {
           value:
             '`/blacklist add|remove|list` • Kelola daftar blacklist\n' +
             '`/admin suspect|trust|risk <user>` • Tandai atau nilai ulang risiko akun\n' +
-            '`/whois <user>` • Lihat detail verifikasi cepat dengan badge & risiko',
+            '`/whois <user>` • Lihat detail verifikasi cepat dengan badge & risiko\n' +
+            '`/rpc mode <default|games>` • (Staff) Ganti status playing bot',
         },
         {
           name: 'Info Bot',
