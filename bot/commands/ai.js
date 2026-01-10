@@ -2,7 +2,8 @@ const { SlashCommandBuilder } = require('discord.js');
 const { ensureMemberOrHigher } = require('../utils/permissions');
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = 'llama-3.3-70b-versatile';
+const DEFAULT_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+const DEFAULT_SAFETY_MODEL = process.env.GROQ_SAFETY_MODEL || DEFAULT_MODEL;
 
 function chunkText(text, maxLen) {
   const chunks = [];
@@ -20,7 +21,7 @@ function chunkText(text, maxLen) {
   return chunks;
 }
 
-async function callGroq({ apiKey, prompt }) {
+async function callGroq({ apiKey, prompt, model, system }) {
   if (typeof fetch !== 'function') {
     throw new Error('fetch-not-available');
   }
@@ -32,14 +33,16 @@ async function callGroq({ apiKey, prompt }) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: String(model || DEFAULT_MODEL),
       temperature: 0.7,
       max_tokens: 512,
       messages: [
         {
           role: 'system',
           content:
-            'You are a helpful assistant inside a Discord server. Be concise, clear, and avoid unsafe or illegal instructions.',
+            typeof system === 'string' && system.trim().length
+              ? system
+              : 'You are a helpful assistant inside a Discord server. Be concise, clear, and avoid unsafe or illegal instructions.',
         },
         { role: 'user', content: String(prompt || '') },
       ],
@@ -57,6 +60,29 @@ async function callGroq({ apiKey, prompt }) {
     throw new Error('empty-response');
   }
   return String(content);
+}
+
+async function moderatePrompt({ apiKey, prompt, model }) {
+  const moderationSystem =
+    'You are a safety moderation filter for a Discord community bot. Determine if the user message should be allowed.\n' +
+    'If the content is spam, harassment, hate, sexual content involving minors, instructions for wrongdoing, or attempts to get secrets, block it.\n' +
+    'Output ONLY one line: ALLOW or BLOCK: <short reason>. No extra text.';
+
+  const raw = await callGroq({
+    apiKey,
+    prompt,
+    model,
+    system: moderationSystem,
+  });
+  const trimmed = String(raw || '').trim();
+  if (/^allow\b/i.test(trimmed)) {
+    return { allow: true, reason: '' };
+  }
+  if (/^block\b/i.test(trimmed)) {
+    const reason = trimmed.replace(/^block\s*:\s*/i, '').trim();
+    return { allow: false, reason: reason || 'blocked' };
+  }
+  return { allow: true, reason: '' };
 }
 
 module.exports = {
@@ -103,7 +129,20 @@ module.exports = {
     await interaction.deferReply({ flags: isPublic ? undefined : 64 });
 
     try {
-      const answer = await callGroq({ apiKey, prompt });
+      const model = process.env.GROQ_MODEL || DEFAULT_MODEL;
+      const safetyEnabled = String(process.env.GROQ_SAFETY_ENABLED || 'true') !== 'false';
+      if (safetyEnabled) {
+        const safetyModel = process.env.GROQ_SAFETY_MODEL || DEFAULT_SAFETY_MODEL;
+        const verdict = await moderatePrompt({ apiKey, prompt, model: safetyModel });
+        if (!verdict.allow) {
+          await interaction.editReply({
+            content: `Pesan kamu ditolak oleh filter keamanan: ${verdict.reason}`,
+          });
+          return;
+        }
+      }
+
+      const answer = await callGroq({ apiKey, prompt, model });
       const chunks = chunkText(answer, 1800);
 
       await interaction.editReply({
