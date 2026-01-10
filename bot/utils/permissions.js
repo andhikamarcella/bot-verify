@@ -23,7 +23,8 @@ function isStaff(interaction) {
     return true;
   }
 
-  const staffRoleIds = [process.env.STAFF_ROLE_ID, process.env.ADMIN_ROLE_ID].filter(Boolean);
+  const adminRoleId = process.env.ADMIN_ROLE_ID || '873576371249627136';
+  const staffRoleIds = [process.env.STAFF_ROLE_ID, adminRoleId].filter(Boolean);
   if (staffRoleIds.length) {
     const cache = interaction.member?.roles?.cache;
     const list = interaction.member?.roles;
