@@ -62,6 +62,9 @@ export type CopyShape = {
     q1: string;
     a1: string;
   };
+  
+  termsContent: Array<{ title: string; text: string }>;
+  privacyContent: Array<{ title: string; text: string }>;
 };
 
 const COPY: Record<LocaleKey, CopyShape> = {
@@ -122,6 +125,26 @@ const COPY: Record<LocaleKey, CopyShape> = {
       q1: 'Why do I need to verify?',
       a1: 'To prevent spam and bots in our community.',
     },
+    
+    termsContent: [
+      { title: '1. Introduction', text: 'Welcome to {guildName}. By verifying, you agree to these terms.' },
+      { title: '2. User Conduct', text: 'You agree not to spam, raid, or harass other members. Multiple accounts are strictly prohibited.' },
+      { title: '3. Bot Usage', text: 'Our verification bot collects your Discord ID and IP address (hashed) for security purposes.' },
+      { title: '4. Termination', text: 'Admins reserve the right to revoke your verified status at any time.' },
+      { title: '5. Liability', text: 'We are not responsible for any issues arising from Discord API downtimes.' },
+      { title: '6. Updates', text: 'These terms may change at any time.' },
+      { title: '7. Final Agreement', text: 'By clicking "I Understand", you confirm you are human and eligible to join.' },
+    ],
+    
+    privacyContent: [
+      { title: '1. Data Collection', text: 'We collect your Discord User ID, Username, and IP Address.' },
+      { title: '2. Purpose', text: 'This data is used solely for verification and anti-abuse measures.' },
+      { title: '3. Data Retention', text: 'Verification logs are stored for 30 days and then anonymized.' },
+      { title: '4. Third Parties', text: 'We use Cloudflare Turnstile for CAPTCHA, which may collect device info.' },
+      { title: '5. Your Rights', text: 'You can request data deletion by contacting the server owner.' },
+      { title: '6. Cookies', text: 'We use local storage to save your language preference.' },
+      { title: '7. Contact', text: 'For privacy concerns, reach out to staff.' },
+    ],
   },
   id: {
     titleSuffix: 'Verifikasi',
@@ -180,6 +203,26 @@ const COPY: Record<LocaleKey, CopyShape> = {
       q1: 'Kenapa harus verifikasi?',
       a1: 'Untuk mencegah spam dan bot di komunitas kami.',
     },
+    
+    termsContent: [
+      { title: '1. Pengenalan', text: 'Selamat datang di {guildName}. Dengan memverifikasi, Anda menyetujui ketentuan ini.' },
+      { title: '2. Perilaku Pengguna', text: 'Anda setuju untuk tidak melakukan spam, raid, atau melecehkan anggota lain. Akun ganda sangat dilarang.' },
+      { title: '3. Penggunaan Bot', text: 'Bot verifikasi kami mengumpulkan ID Discord dan alamat IP Anda (dihash) untuk keamanan.' },
+      { title: '4. Pengakhiran', text: 'Admin berhak mencabut status terverifikasi Anda kapan saja.' },
+      { title: '5. Tanggung Jawab', text: 'Kami tidak bertanggung jawab atas masalah yang timbul dari downtime API Discord.' },
+      { title: '6. Pembaruan', text: 'Ketentuan ini dapat berubah sewaktu-waktu.' },
+      { title: '7. Persetujuan Akhir', text: 'Dengan mengklik "Saya Mengerti", Anda mengonfirmasi bahwa Anda adalah manusia dan memenuhi syarat untuk bergabung.' },
+    ],
+    
+    privacyContent: [
+      { title: '1. Pengumpulan Data', text: 'Kami mengumpulkan ID Pengguna Discord, Nama Pengguna, dan Alamat IP Anda.' },
+      { title: '2. Tujuan', text: 'Data ini digunakan semata-mata untuk verifikasi dan tindakan anti-penyalahgunaan.' },
+      { title: '3. Retensi Data', text: 'Log verifikasi disimpan selama 30 hari kemudian dianonimkan.' },
+      { title: '4. Pihak Ketiga', text: 'Kami menggunakan Cloudflare Turnstile untuk CAPTCHA, yang dapat mengumpulkan informasi perangkat.' },
+      { title: '5. Hak Anda', text: 'Anda dapat meminta penghapusan data dengan menghubungi pemilik server.' },
+      { title: '6. Cookies', text: 'Kami menggunakan penyimpanan lokal untuk menyimpan preferensi bahasa Anda.' },
+      { title: '7. Kontak', text: 'Untuk masalah privasi, hubungi staf.' },
+    ],
   },
 };
 
