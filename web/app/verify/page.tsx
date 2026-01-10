@@ -155,16 +155,20 @@ export default function VerifyPage() {
   console.log('[Verify] Starting verification', { 
     token: token.substring(0, 10) + '...', 
     captchaType: captchaResult.type,
-    hasValue: !!captchaResult.value 
+    hasValue: !!captchaResult.value,
+    tokenLength: captchaResult.value.length
   });
 
   setStep(2);
   setStatusMsg(t.verifying);
 
+  // Get real IP address (will be handled by backend if not available)
   const body = {
     token,
-    captchaResult,
-    ip: "0.0.0.0",
+    captchaResult: {
+      type: captchaResult.type,
+      value: captchaResult.value
+    },
   };
 
   try {
@@ -179,7 +183,12 @@ export default function VerifyPage() {
 
     const data: VerifyResponse = await res.json();
 
-    console.log('[Verify] Response received', { ok: data.ok, error: data.error });
+    console.log('[Verify] Response received', { 
+      ok: data.ok, 
+      error: data.error,
+      reason: data.reason,
+      status: res.status
+    });
 
     if (data.ok) {
       setStep(3);
@@ -188,11 +197,23 @@ export default function VerifyPage() {
       setStep(1);
       // Reset captcha result untuk allow retry
       setCaptchaResult(null);
-      setStatusMsg(
-        data.error === "maintenance-mode"
-          ? `${t.envCheck.maintenance}: ${data.reason}`
-          : t.verifyFailed + (data.error ? ` (${data.error})` : "")
-      );
+      
+      let errorMessage = t.verifyFailed;
+      if (data.error) {
+        if (data.error === "maintenance-mode") {
+          errorMessage = `${t.envCheck.maintenance}: ${data.reason || ''}`;
+        } else if (data.error === "captcha-invalid") {
+          errorMessage = t.verifyFailed + " (Captcha tidak valid. Silakan coba lagi.)";
+        } else if (data.error === "token-expired") {
+          errorMessage = t.tokenExpired;
+        } else if (data.error === "invalid-token") {
+          errorMessage = t.tokenMissing;
+        } else {
+          errorMessage = t.verifyFailed + (data.error ? ` (${data.error})` : "");
+        }
+      }
+      
+      setStatusMsg(errorMessage);
     }
   } catch (err) {
     console.error('[Verify] Error:', err);
