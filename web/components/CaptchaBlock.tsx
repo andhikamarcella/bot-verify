@@ -79,16 +79,17 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
             widgetId.current = window.turnstile.render(containerRef.current, {
                 sitekey: siteKey,
                 callback: (token: string) => {
-                    console.log('[Turnstile] Callback triggered with token:', token ? 'present' : 'missing');
-                    if (token) {
+                    console.log('[Turnstile] Callback triggered with token:', token ? `present (${token.length} chars)` : 'missing');
+                    if (token && token.trim() !== '') {
                         if (!hasCalledCallback.current) {
                             console.log('[Turnstile] Token received, calling handleSolved');
+                            // Call immediately to prevent expiration
                             handleSolved({ type: 'turnstile', value: token });
                         } else {
-                            console.log('[Turnstile] Token received but callback already called');
+                            console.log('[Turnstile] Token received but callback already called, ignoring');
                         }
                     } else {
-                        console.warn('[Turnstile] Callback triggered but token is empty');
+                        console.warn('[Turnstile] Callback triggered but token is empty or invalid');
                     }
                 },
                 'error-callback': (error: any) => {
