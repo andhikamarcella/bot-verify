@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { Routes } = require('discord.js');
 
-const REST_TIMEOUT_MS = Number(process.env.DISCORD_REST_TIMEOUT_MS || 30_000);
+const REST_TIMEOUT_MS = Number(process.env.DISCORD_REST_TIMEOUT_MS || 120_000);
 
 function withTimeout(promise, label) {
   let timer = null;
@@ -199,6 +199,7 @@ async function syncGuildCommands(rest, clientId, guildId, manifest) {
     seen.add(entry.json.name);
     payload.push(entry.json);
   }
+  console.log(`🧾 Menyiapkan ${payload.length} command untuk guild ${guildId}...`);
   await restCall(rest, 'put', guildRoute, { body: payload }, `Pasang command guild ${guildId}`);
   await removeDuplicateGuildCommands(rest, clientId, guildId);
   return payload.map((item) => item.name);
