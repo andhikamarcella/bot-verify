@@ -14,12 +14,20 @@ async function verifyTurnstile(token, secret, ip) {
     return false;
   }
 
+  // Validate token format (Turnstile tokens are typically long base64 strings)
+  if (token.length < 100) {
+    console.error('[Turnstile] Token seems too short:', token.length);
+    return false;
+  }
+
   console.log('[Turnstile] Verifying token', {
     tokenLength: token.length,
     tokenPrefix: token.substring(0, 20) + '...',
     hasSecret: !!secret,
     secretPrefix: secret.substring(0, 10) + '...',
-    ip: ip || 'not provided'
+    secretLength: secret.length,
+    ip: ip || 'not provided',
+    timestamp: new Date().toISOString()
   });
 
   try {
