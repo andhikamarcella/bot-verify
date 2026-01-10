@@ -8,6 +8,36 @@ const RAW_REST_TIMEOUT_MS =
     : Number(process.env.DISCORD_REST_TIMEOUT_MS);
 const REST_TIMEOUT_MS = Number.isFinite(RAW_REST_TIMEOUT_MS) && RAW_REST_TIMEOUT_MS > 0 ? RAW_REST_TIMEOUT_MS : null;
 
+const RAW_COMMAND_SYNC_DELAY_MS =
+  process.env.COMMAND_SYNC_DELAY_MS === undefined
+    ? 1250
+    : Number(process.env.COMMAND_SYNC_DELAY_MS);
+const COMMAND_SYNC_DELAY_MS =
+  Number.isFinite(RAW_COMMAND_SYNC_DELAY_MS) && RAW_COMMAND_SYNC_DELAY_MS >= 0 ? RAW_COMMAND_SYNC_DELAY_MS : 1250;
+
+const rateLimitLoggerAttached = new WeakSet();
+
+function attachRateLimitLogger(rest) {
+  if (!rest || typeof rest.on !== 'function') return;
+  if (rateLimitLoggerAttached.has(rest)) return;
+  rateLimitLoggerAttached.add(rest);
+
+  rest.on('rateLimited', (info) => {
+    try {
+      const timeout = info?.timeout;
+      const limit = info?.limit;
+      const method = info?.method;
+      const route = info?.route || info?.path;
+      const global = info?.global;
+      console.warn(
+        `🛑 Discord rate limit${global ? ' (GLOBAL)' : ''}: ${method || ''} ${route || ''} • limit=${limit ?? '?'} • wait=${timeout ?? '?'}ms`
+      );
+    } catch (_) {
+      console.warn('🛑 Discord rate limit: (detail tidak terbaca)');
+    }
+  });
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -42,6 +72,7 @@ function shouldBypassTimeout(label, route) {
 
 async function restCall(rest, method, route, options, label) {
   const startedAt = Date.now();
+  attachRateLimitLogger(rest);
   const heartbeatRaw =
     process.env.DISCORD_REST_HEARTBEAT_MS === undefined
       ? 15000
@@ -49,7 +80,7 @@ async function restCall(rest, method, route, options, label) {
   const heartbeatMs = Number.isFinite(heartbeatRaw) && heartbeatRaw > 0 ? heartbeatRaw : null;
   let heartbeatTimer = null;
   try {
-    console.log(`➡️  ${label}...`);
+    console.log(`➡️  ${label}... [${String(method || '').toUpperCase()} ${route}]`);
     if (heartbeatMs) {
       heartbeatTimer = setInterval(() => {
         const elapsed = Date.now() - startedAt;
@@ -256,7 +287,7 @@ async function syncGuildCommandsIndividually(rest, clientId, guildId, payload) {
     } else {
       await restCall(rest, 'post', guildRoute, { body: cmd }, `Buat command guild ${cmd.name}`);
     }
-    await sleep(250);
+    await sleep(COMMAND_SYNC_DELAY_MS);
   }
 
   if (Array.isArray(existing)) {
@@ -270,7 +301,7 @@ async function syncGuildCommandsIndividually(rest, clientId, guildId, payload) {
           undefined,
           `Hapus command guild ${cmd.name}`
         );
-        await sleep(250);
+        await sleep(COMMAND_SYNC_DELAY_MS);
       }
     }
   }
