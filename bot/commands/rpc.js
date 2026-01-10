@@ -1,21 +1,13 @@
 const { SlashCommandBuilder, ActivityType } = require('discord.js');
 const { ensureStaff } = require('../utils/permissions');
-const { setPresenceMode, getPresenceMode } = require('../bot');
+const { setPresenceMode, getPresenceMode, getPresencePoolForMode } = require('../bot');
 
 const SUPPORT_INVITE_URL = 'https://discord.gg/w3ENr2uEeH';
 
-const presenceMessages = [
-  'Verifying members | /verify',
-  'Protecting servers | /verify',
-  'Need help? Try /help',
-  'Join support: discord.gg/w3ENr2uEeH',
-];
-
-const gamePresenceMessages = [
-  'Elden Ring',
-  'Dark Souls',
-  'The Elder Scrolls',
-];
+function modeHasButtons(mode) {
+  const normalized = String(mode || '').toLowerCase();
+  return normalized === 'default' || normalized === 'commands';
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -33,7 +25,11 @@ module.exports = {
             .setRequired(true)
             .addChoices(
               { name: 'default', value: 'default' },
-              { name: 'games', value: 'games' }
+              { name: 'games', value: 'games' },
+              { name: 'commands', value: 'commands' },
+              { name: 'funfact', value: 'funfact' },
+              { name: 'dadjoke', value: 'dadjoke' },
+              { name: 'mixed', value: 'mixed' }
             )
         )
     )
@@ -52,13 +48,13 @@ module.exports = {
       const mode = interaction.options.getString('value');
       setPresenceMode(mode);
 
-      const pool = mode === 'games' ? gamePresenceMessages : presenceMessages;
+      const pool = getPresencePoolForMode(mode);
       const activity = {
         name: pool[0],
         type: ActivityType.Playing,
       };
 
-      if (mode !== 'games') {
+      if (modeHasButtons(mode)) {
         activity.buttons = ['Join Support Server'];
         activity.metadata = { button_urls: [SUPPORT_INVITE_URL] };
         activity.url = SUPPORT_INVITE_URL;
