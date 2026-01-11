@@ -546,4 +546,74 @@ router.post('/verify', async (req, res) => {
   }
 });
 
+// GET /api/interview-status?token=xxx
+router.get('/interview-status', async (req, res) => {
+  const { token } = req.query || {};
+  if (!token) {
+    return res.status(400).json({ ok: false, error: 'missing-token' });
+  }
+
+  try {
+    await connectMongo();
+    const record = await findToken(token);
+    if (!record) {
+      return res.status(400).json({ ok: false, error: 'invalid-token' });
+    }
+
+    const response = {
+      ok: true,
+      status: record.status,
+      interviewLink: record.interviewLink || null,
+      interviewSubmittedAt: record.interviewSubmittedAt || null,
+      reviewStatus: record.reviewStatus || null,
+      reason: record.reason || null,
+    };
+
+    res.json(response);
+  } catch (err) {
+    console.error('[API] Interview status error:', err);
+    res.status(500).json({ ok: false, error: 'internal-error' });
+  }
+});
+
+// POST /api/interview-submit (bot calls this when user submits interview via DM)
+router.post('/interview-submit', async (req, res) => {
+  const { token, answers } = req.body || {};
+  if (!token) {
+    return res.status(400).json({ ok: false, error: 'missing-token' });
+  }
+
+  try {
+    await connectMongo();
+    const record = await findToken(token);
+    if (!record || record.status !== 'INTERVIEW_REQUIRED') {
+      return res.status(400).json({ ok: false, error: 'invalid-token-or-status' });
+    }
+
+    // Update token with interview answers
+    await setTokenStatus(token, 'INTERVIEW_ANSWERED', {
+      interviewAnswers: answers,
+      interviewSubmittedAt: new Date().toISOString(),
+    });
+
+    // Log interview submission
+    await sendVerificationLog({
+      client,
+      guildId: record.guildId,
+      config: await getGuildConfig(record.guildId),
+      user: { id: record.userId, tag: `User ${record.userId}` },
+      member: null,
+      type: 'INTERVIEW_SUBMITTED',
+      status: 'INTERVIEW_ANSWERED',
+      riskScore: 0,
+      reason: `Interview submitted via DM`,
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[API] Interview submit error:', err);
+    res.status(500).json({ ok: false, error: 'internal-error' });
+  }
+});
+
 module.exports = router;
