@@ -32,6 +32,8 @@ const {
   ensureStaff,
   isStaff,
   isMemberOrHigher,
+  hasNonEveryoneRole,
+  isStaffMember,
 } = require('../utils/permissions');
 
 const FRONTEND_BASE = (process.env.PUBLIC_FRONTEND_URL || '').replace(/\/$/, '');
@@ -64,9 +66,9 @@ async function sendVerificationDm(user, url) {
 async function handleStart(interaction) {
   const blacklistEntry = await getBlacklistEntry(interaction.user.id, interaction.guildId).catch(() => null);
   if (blacklistEntry) {
-    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-    if (member) {
-      await member.kick(`Blacklisted: ${blacklistEntry.reason || 'unspecified'}`).catch(() => {});
+    const blacklistedMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (blacklistedMember) {
+      await blacklistedMember.kick(`Blacklisted: ${blacklistEntry.reason || 'unspecified'}`).catch(() => {});
     }
     try {
       if (typeof interaction.deferUpdate === 'function' && interaction.isButton?.()) {
@@ -87,6 +89,24 @@ async function handleStart(interaction) {
       flags: 64,
     });
     return;
+  }
+
+  const currentMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+  if (currentMember) {
+    if (isStaffMember(currentMember)) {
+      await interaction.reply({
+        content: 'Kamu staff/admin, verifikasi tidak diperlukan.',
+        flags: 64,
+      });
+      return;
+    }
+    if (hasNonEveryoneRole(currentMember)) {
+      await interaction.reply({
+        content: 'Kamu sudah punya role di server, verifikasi tidak diperlukan.',
+        flags: 64,
+      });
+      return;
+    }
   }
   if (shouldRateLimit(interaction.user.id, `verify-start:${interaction.guildId}`, 30 * 1000)) {
     await interaction.reply({
