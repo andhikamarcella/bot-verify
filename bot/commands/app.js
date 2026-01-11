@@ -418,12 +418,18 @@ module.exports = {
 
     if (sub === 'interview') {
       const note = interaction.options.getString('note') || null;
+
+      // Generate interview link
+      const baseUrl = process.env.PUBLIC_FRONTEND_URL || process.env.FRONTEND_BASE || 'http://localhost:3000';
+      const interviewLink = `${baseUrl}/interview?token=${encodeURIComponent(token)}&guild=${encodeURIComponent(guild.name)}`;
+
       await setTokenStatus(token, 'INTERVIEW_REQUIRED', {
         reviewedBy: interaction.user.id,
         reviewedAt: new Date(),
         reviewDecision: 'INTERVIEW',
         reviewNotes: note,
         interviewQuestionSentAt: new Date(),
+        interviewLink: interviewLink,
       });
 
       if (user) {
@@ -431,11 +437,13 @@ module.exports = {
           await user.send(
             [
               'Staf meminta interview singkat untuk aplikasi kamu.',
-              'Balas DM ini dengan alasan join yang lebih lengkap (minimal 100 karakter).',
+              `Buka link berikut untuk mengisi form interview: ${interviewLink}`,
+              '',
+              'Atau balas DM ini dengan alasan join yang lebih lengkap (minimal 100 karakter).',
             ].join('\n')
           );
-        } catch (_) {
-          null;
+        } catch (dmErr) {
+          console.error('[App] Failed to DM user for interview:', dmErr);
         }
       }
 
@@ -451,7 +459,7 @@ module.exports = {
         reason: `Token: ${token}${note ? `\nNote: ${short(note, 900)}` : ''}`,
       });
 
-      await interaction.editReply({ content: `✅ Marked interview for <@${tokenDoc.userId}>` });
+      await interaction.editReply({ content: `✅ Marked interview for <@${tokenDoc.userId}> and sent interview link` });
       return;
     }
 
