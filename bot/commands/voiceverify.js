@@ -112,7 +112,7 @@ async function groqTtsWav(text) {
   return buf;
 }
 
-async function groqTranscribe(fileBuffer, filename) {
+async function groqTranscribe(fileBuffer, filename, language) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('missing-groq-api-key');
 
@@ -121,8 +121,9 @@ async function groqTranscribe(fileBuffer, filename) {
   form.append('file', blob, filename || 'audio.wav');
   form.append('model', DEFAULT_STT_MODEL);
   form.append('response_format', 'json');
-  if (process.env.GROQ_STT_LANGUAGE) {
-    form.append('language', String(process.env.GROQ_STT_LANGUAGE));
+  const lang = String(language || process.env.GROQ_STT_LANGUAGE || '').trim();
+  if (lang) {
+    form.append('language', lang);
   }
 
   const res = await fetch(`${GROQ_API_BASE}/audio/transcriptions`, {
@@ -262,7 +263,21 @@ module.exports = {
     .setName('voiceverify')
     .setDescription('Verifikasi via voice channel (eksperimental)')
     .setDMPermission(false)
-    .addSubcommand((sub) => sub.setName('start').setDescription('Mulai verifikasi voice'))
+    .addSubcommand((sub) =>
+      sub
+        .setName('start')
+        .setDescription('Mulai verifikasi voice')
+        .addStringOption((opt) =>
+          opt
+            .setName('lang')
+            .setDescription('Bahasa prompt (default: id)')
+            .setRequired(false)
+            .addChoices(
+              { name: 'Indonesian', value: 'id' },
+              { name: 'English', value: 'en' }
+            )
+        )
+    )
     .addSubcommand((sub) => sub.setName('stop').setDescription('Hentikan verifikasi voice')),
 
   async execute(interaction) {
@@ -313,6 +328,9 @@ module.exports = {
 
     const config = await fetchConfig(guild.id);
 
+    const langChoice = String(interaction.options.getString('lang') || 'id').toLowerCase();
+    const sttLang = langChoice === 'en' ? 'en' : 'id';
+
     const code = randomDigits(Number(process.env.VOICEVERIFY_DIGITS) || 3);
     const maxAttempts = Math.max(1, Number(process.env.VOICEVERIFY_MAX_ATTEMPTS) || 3);
 
@@ -338,14 +356,20 @@ module.exports = {
     try {
       await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
 
-      const prompt = `Halo. Sebutkan angka: ${digitsWithHyphens(code)}.`;
+      const prompt =
+        langChoice === 'en'
+          ? `Hello. Please say the digits: ${digitsWithHyphens(code)}.`
+          : `Halo. Sebutkan angka: ${digitsWithHyphens(code)}.`;
       try {
         const wav = await groqTtsWav(prompt);
         await playWavToConnection(connection, wav);
       } catch (error) {
         // fallback: still proceed with text instruction
         await interaction.followUp({
-          content: `Tidak bisa memutar TTS di voice (cek ffmpeg / format audio). Tetap lanjut: sebutkan angka **${code}** lewat mic sekarang.`,
+          content:
+            langChoice === 'en'
+              ? `Cannot play TTS in voice (check ffmpeg / audio format). Continue: please say **${code}** on your mic now.`
+              : `Tidak bisa memutar TTS di voice (cek ffmpeg / format audio). Tetap lanjut: sebutkan angka **${code}** lewat mic sekarang.`,
           flags: 64,
         });
       }
@@ -357,7 +381,7 @@ module.exports = {
 
         await recordUserToWav(connection, interaction.user.id, tmpPath);
         const oggBuf = await fs.promises.readFile(tmpPath);
-        const transcript = await groqTranscribe(oggBuf, path.basename(tmpPath));
+        const transcript = await groqTranscribe(oggBuf, path.basename(tmpPath), sttLang);
         const answer = normalizeAnswer(transcript);
 
         if (answer === code) {
