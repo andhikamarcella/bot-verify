@@ -325,7 +325,22 @@ module.exports = {
 
     const channel = member?.voice?.channel;
     if (!channel) {
-      await interaction.reply({ content: 'Kamu harus join voice channel dulu.', flags: 64 });
+      // Try to find a voice verification channel and move user there
+      const voiceChannelId = process.env.VOICEVERIFY_CHANNEL_ID;
+      if (voiceChannelId) {
+        const voiceChannel = guild.channels.cache.get(voiceChannelId) || await guild.channels.fetch(voiceChannelId).catch(() => null);
+        if (voiceChannel && voiceChannel.isVoiceBased()) {
+          try {
+            await member.voice.setChannel(voiceChannel, 'Voice verification');
+            await interaction.reply({ content: 'Kamu dipindahkan ke voice channel verifikasi. Silakan coba lagi.', flags: 64 });
+            return;
+          } catch (moveErr) {
+            console.error('[VoiceVerify] Failed to move user to voice channel:', moveErr);
+          }
+        }
+      }
+      
+      await interaction.reply({ content: 'Kamu harus join voice channel dulu. Jika gabisa masuk, hubungi staff untuk permission voice channel.', flags: 64 });
       return;
     }
 
