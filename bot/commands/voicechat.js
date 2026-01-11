@@ -13,6 +13,7 @@ const {
 } = require('@discordjs/voice');
 const prism = require('prism-media');
 const { SlashCommandBuilder } = require('discord.js');
+const { normalizeTtsText } = require('../utils/tts');
 
 const GROQ_API_BASE = 'https://api.groq.com/openai/v1';
 const GROQ_CHAT_URL = `${GROQ_API_BASE}/chat/completions`;
@@ -54,9 +55,11 @@ function pcmToWavBuffer(pcmBuffer, { channels, sampleRate }) {
   return Buffer.concat([header, pcmBuffer]);
 }
 
-async function groqTtsWav(text) {
+async function groqTtsWav(text, lang) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('missing-groq-api-key');
+
+  const normalized = normalizeTtsText(text, lang);
 
   const res = await fetch(`${GROQ_API_BASE}/audio/speech`, {
     method: 'POST',
@@ -67,7 +70,7 @@ async function groqTtsWav(text) {
     body: JSON.stringify({
       model: DEFAULT_TTS_MODEL,
       voice: DEFAULT_TTS_VOICE,
-      input: String(text || '').slice(0, 600),
+      input: String(normalized || '').slice(0, 900),
       response_format: 'wav',
     }),
   });
@@ -322,7 +325,7 @@ module.exports = {
         : 'Voice chat dimulai. Silakan tanya sesuatu.';
 
       try {
-        const wav = await groqTtsWav(greet);
+        const wav = await groqTtsWav(greet, langChoice);
         await playWavToConnection(connection, wav);
       } catch (_) {
         await interaction.followUp({ content: greet, flags: 64 });
@@ -352,7 +355,7 @@ module.exports = {
         messages.push({ role: 'assistant', content: answer });
 
         try {
-          const wav = await groqTtsWav(answer);
+          const wav = await groqTtsWav(answer, langChoice);
           await playWavToConnection(connection, wav);
         } catch (err) {
           await interaction.followUp({ content: `TTS error: ${err?.message || err}`, flags: 64 });
