@@ -267,6 +267,8 @@ export default function VerifyPage() {
       if (data.error) {
         if (data.error === "maintenance-mode") {
           errorMessage = `${t.envCheck.maintenance}: ${data.reason || ''}`;
+        } else if (data.error === 'application-reason-too-short') {
+          errorMessage = t.applicationReasonError;
         } else if (data.error === "captcha-invalid") {
           // Show more specific error message
           const reason = data.reason || '';
