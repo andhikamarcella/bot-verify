@@ -12,7 +12,9 @@ const { connectMongo } = require('../../api/lib/db');
 const {
   createTokenDocument,
   findLatestByUser,
+  listDmMessagesForUser,
   setTokenStatus,
+  clearTokenDmFields,
 } = require('../../api/models/Tokens');
 const { getExtraRolesForUser } = require('../../api/lib/roleSync');
 const { fetchConfig, updateConfig } = require('../utils/guildConfig');
@@ -112,6 +114,29 @@ async function handleStart(interaction) {
     incrementAttempts: true,
   });
   const verifyUrl = `${FRONTEND_BASE}/verify?token=${token}`;
+
+  try {
+    const oldMessages = await listDmMessagesForUser(interaction.user.id, interaction.guildId, 25).catch(() => []);
+    for (const item of oldMessages) {
+      const channelId = item?.dmChannelId;
+      const messageId = item?.dmMessageId;
+      if (!channelId || !messageId) continue;
+      try {
+        const dmChannel = await interaction.client.channels.fetch(channelId).catch(() => null);
+        if (dmChannel?.messages) {
+          const msg = await dmChannel.messages.fetch(messageId).catch(() => null);
+          if (msg && msg.author?.id === interaction.client.user.id) {
+            await msg.delete().catch(() => {});
+          }
+        }
+      } catch (_) {
+        // ignore
+      }
+      await clearTokenDmFields(item.token).catch(() => {});
+    }
+  } catch (_) {
+    // ignore
+  }
 
   try {
     const dmMessage = await sendVerificationDm(interaction.user, verifyUrl);
