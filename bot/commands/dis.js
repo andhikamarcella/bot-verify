@@ -1,4 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
+const { getVoiceConnection } = require('@discordjs/voice');
 const { ensureStaff } = require('../utils/permissions');
 
 // Shared connection map is stored on globalThis to allow reuse across command modules
@@ -27,7 +28,7 @@ module.exports = {
     }
 
     const map = globalThis.__voiceConnections;
-    const connection = map.get(guild.id);
+    const connection = map.get(guild.id) || getVoiceConnection(guild.id);
     if (!connection) {
       await interaction.reply({ content: 'Bot tidak sedang terkoneksi ke voice.', flags: 64 });
       return;
@@ -38,7 +39,11 @@ module.exports = {
     } catch (_) {
       null;
     }
-    map.delete(guild.id);
+    try {
+      map.delete(guild.id);
+    } catch (_) {
+      null;
+    }
 
     await interaction.reply({ content: '✅ Bot disconnected dari voice.', flags: 64 });
   },
