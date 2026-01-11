@@ -36,6 +36,8 @@ const {
   findLatestByUser,
   setTokenStatus,
   findLatestByUserWithStatuses,
+  listDmMessagesForUser,
+  clearTokenDmFields,
 } = require('../api/models/Tokens');
 const { getExtraRolesForUser } = require('../api/lib/roleSync');
 const { computeRiskScore } = require('../api/lib/riskScore');
@@ -345,6 +347,30 @@ async function scheduleReminder(member) {
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setLabel('Verify Me').setStyle(ButtonStyle.Link).setURL(verificationUrl)
       );
+
+      try {
+        const oldMessages = await listDmMessagesForUser(member.id, member.guild.id, 25).catch(() => []);
+        for (const item of oldMessages) {
+          const channelId = item?.dmChannelId;
+          const messageId = item?.dmMessageId;
+          if (!channelId || !messageId) continue;
+          try {
+            const dmChannel = await client.channels.fetch(channelId).catch(() => null);
+            if (dmChannel?.messages) {
+              const msg = await dmChannel.messages.fetch(messageId).catch(() => null);
+              if (msg && msg.author?.id === client.user.id) {
+                await msg.delete().catch(() => {});
+              }
+            }
+          } catch (_) {
+            // ignore
+          }
+          await clearTokenDmFields(item.token).catch(() => {});
+        }
+      } catch (_) {
+        // ignore
+      }
+
       const dmMessage = await member.send({
         content: [
           `Hai ${member.user.username}!`,
