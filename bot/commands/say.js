@@ -119,7 +119,17 @@ module.exports = {
       await playWavToConnection(connection, wav);
       await interaction.editReply({ content: '✅ Selesai bicara.' });
     } catch (error) {
-      await interaction.editReply({ content: `Say error: ${error?.message || error}` });
+      const msg = String(error?.message || error || 'unknown-error');
+      if (msg.includes('requires terms acceptance')) {
+        await interaction.editReply({
+          content:
+            'Say error: model TTS butuh persetujuan Terms di Groq.\n' +
+            'Buka dan accept terms di: https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english\n' +
+            'Setelah itu coba lagi, atau ganti model via env `GROQ_TTS_MODEL`. ',
+        });
+        return;
+      }
+      await interaction.editReply({ content: `Say error: ${msg}` });
     }
   },
 };
