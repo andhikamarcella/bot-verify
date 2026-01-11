@@ -20,6 +20,14 @@ export type CopyShape = {
   nicknamePlaceholder: string;
   nicknameHint: string;
   nicknameSuggestions: string;
+
+  applicationReasonLabel: string;
+  applicationReasonPlaceholder: string;
+  applicationReasonHint: string;
+  applicationReasonError: string;
+
+  reviewPendingMessage: string;
+  reviewInterviewMessage: string;
   
   // New Additions
   step0: string;
@@ -89,6 +97,14 @@ const COPY: Record<LocaleKey, CopyShape> = {
     nicknamePlaceholder: 'Enter your desired nickname...',
     nicknameHint: 'This will be used as your server nickname after verification (max 32 chars).',
     nicknameSuggestions: 'Suggestions',
+
+    applicationReasonLabel: 'Why do you want to join? (required)',
+    applicationReasonPlaceholder: 'Tell us briefly why you want to join...',
+    applicationReasonHint: 'Minimum 10 characters. Very short answers may require an interview.',
+    applicationReasonError: 'Please fill the reason (min 10 characters).',
+
+    reviewPendingMessage: '✅ Submitted. Your application is pending staff review.',
+    reviewInterviewMessage: '✅ Submitted. Because your answer was very short, staff may interview you via DM.',
     
     step0: 'Agreement',
     step1: 'Security Check',
@@ -186,6 +202,14 @@ const COPY: Record<LocaleKey, CopyShape> = {
     nicknamePlaceholder: 'Isi nickname yang kamu mau...',
     nicknameHint: 'Akan dipakai sebagai nickname di server setelah verifikasi (maks 32 karakter).',
     nicknameSuggestions: 'Saran',
+
+    applicationReasonLabel: 'Alasan join? (wajib)',
+    applicationReasonPlaceholder: 'Ceritakan singkat alasan kamu ingin join...',
+    applicationReasonHint: 'Minimal 10 karakter. Jawaban terlalu singkat bisa wajib interview.',
+    applicationReasonError: 'Alasan wajib diisi (minimal 10 karakter).',
+
+    reviewPendingMessage: '✅ Terkirim. Aplikasi kamu sedang menunggu review staf.',
+    reviewInterviewMessage: '✅ Terkirim. Karena jawaban kamu sangat singkat, kamu mungkin akan diinterview via DM.',
     
     step0: 'Persetujuan',
     step1: 'Cek Keamanan',
