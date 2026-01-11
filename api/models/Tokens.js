@@ -75,6 +75,16 @@ async function setTokenStatus(token, status, fields = {}) {
   return findToken(token);
 }
 
+async function updateTokenFields(token, fields = {}) {
+  const collection = await getCollection();
+  await collection.updateOne({ token }, { $set: { ...fields } });
+  return findToken(token);
+}
+
+async function clearTokenDmFields(token) {
+  return updateTokenFields(token, { dmChannelId: null, dmMessageId: null });
+}
+
 async function bindIpToToken(token, ip) {
   const collection = await getCollection();
   await collection.updateOne({ token }, { $set: { boundIp: ip } });
@@ -119,14 +129,42 @@ async function listDmMessagesForUser(userId, guildId, limit = 25) {
     .toArray();
 }
 
+async function listDmMessagesForGuild(guildId, {
+  userId = null,
+  olderThanMinutes = 0,
+  limit = 100,
+} = {}) {
+  const collection = await getCollection();
+  const query = {
+    guildId: String(guildId),
+    dmChannelId: { $ne: null },
+    dmMessageId: { $ne: null },
+  };
+  if (userId) {
+    query.userId = String(userId);
+  }
+  if (olderThanMinutes && Number(olderThanMinutes) > 0) {
+    const cutoff = new Date(Date.now() - Number(olderThanMinutes) * 60 * 1000);
+    query.createdAt = { $lte: cutoff };
+  }
+  return collection
+    .find(query)
+    .sort({ createdAt: -1 })
+    .limit(Math.max(1, Math.min(Number(limit) || 100, 500)))
+    .toArray();
+}
+
 module.exports = {
   createTokenDocument,
   findToken,
   findLatestByUser,
   findLatestByUserWithStatuses,
   setTokenStatus,
+  updateTokenFields,
+  clearTokenDmFields,
   listRecentVerified,
   bindIpToToken,
   listDmMessagesForUser,
+  listDmMessagesForGuild,
   listByStatuses,
 };
