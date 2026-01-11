@@ -4,7 +4,13 @@ const {
   PermissionFlagsBits,
 } = require('discord.js');
 
-const { findToken, listByStatuses, setTokenStatus } = require('../../api/models/Tokens');
+const {
+  findToken,
+  listByStatuses,
+  setTokenStatus,
+  listDmMessagesForGuild,
+  clearTokenDmFields,
+} = require('../../api/models/Tokens');
 const { upsertUserProfile } = require('../../api/models/Users');
 const { fetchConfig } = require('../utils/guildConfig');
 const { sendVerificationLog } = require('../utils/logging');
@@ -91,6 +97,26 @@ module.exports = {
         .setDescription('Blacklist + ban user')
         .addUserOption((opt) => opt.setName('user').setDescription('Target user').setRequired(true))
         .addStringOption((opt) => opt.setName('reason').setDescription('Reason').setRequired(true))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('purge-dm')
+        .setDescription('Hapus DM verifikasi lama sampai bersih (staff only)')
+        .addUserOption((opt) => opt.setName('user').setDescription('Target user (opsional)').setRequired(false))
+        .addIntegerOption((opt) =>
+          opt
+            .setName('older_than_minutes')
+            .setDescription('Hanya hapus DM token yang lebih lama dari X menit (default 15)')
+            .setMinValue(0)
+            .setMaxValue(60 * 24 * 30)
+        )
+        .addIntegerOption((opt) =>
+          opt
+            .setName('limit')
+            .setDescription('Batas jumlah token/DM yang diproses (default 100)')
+            .setMinValue(1)
+            .setMaxValue(500)
+        )
     ),
 
   async execute(interaction, client) {
@@ -169,6 +195,80 @@ module.exports = {
       });
 
       await interaction.editReply({ content: `✅ <@${user.id}> diblacklist + diban. (${reason})` });
+      return;
+    }
+
+    if (sub === 'purge-dm') {
+      const targetUser = interaction.options.getUser('user');
+      const olderThanMinutes = interaction.options.getInteger('older_than_minutes') ?? 15;
+      const limit = interaction.options.getInteger('limit') ?? 100;
+
+      const items = await listDmMessagesForGuild(guild.id, {
+        userId: targetUser?.id || null,
+        olderThanMinutes,
+        limit,
+      });
+
+      if (!items.length) {
+        await interaction.editReply({ content: 'Tidak ada DM verifikasi yang bisa dihapus.' });
+        return;
+      }
+
+      let deleted = 0;
+      let cleared = 0;
+      let skippedNotFound = 0;
+      let skippedNotBot = 0;
+
+      for (const doc of items) {
+        const channelId = doc?.dmChannelId;
+        const messageId = doc?.dmMessageId;
+        if (!channelId || !messageId) continue;
+
+        try {
+          const dmChannel = await client.channels.fetch(channelId).catch(() => null);
+          if (!dmChannel?.messages) {
+            skippedNotFound += 1;
+            await clearTokenDmFields(doc.token).catch(() => {});
+            cleared += 1;
+            continue;
+          }
+
+          const msg = await dmChannel.messages.fetch(messageId).catch(() => null);
+          if (!msg) {
+            skippedNotFound += 1;
+            await clearTokenDmFields(doc.token).catch(() => {});
+            cleared += 1;
+            continue;
+          }
+
+          if (msg.author?.id && msg.author.id !== client.user.id) {
+            skippedNotBot += 1;
+            await clearTokenDmFields(doc.token).catch(() => {});
+            cleared += 1;
+            continue;
+          }
+
+          await msg.delete().catch(() => {});
+          deleted += 1;
+
+          await clearTokenDmFields(doc.token).catch(() => {});
+          cleared += 1;
+        } catch (_) {
+          // best effort
+          await clearTokenDmFields(doc.token).catch(() => {});
+          cleared += 1;
+        }
+      }
+
+      await interaction.editReply({
+        content:
+          `✅ Purge DM selesai.\n` +
+          `Processed: ${items.length}\n` +
+          `Deleted: ${deleted}\n` +
+          `Cleared DB refs: ${cleared}\n` +
+          `Skipped not found: ${skippedNotFound}\n` +
+          `Skipped not bot-authored: ${skippedNotBot}`,
+      });
       return;
     }
 
