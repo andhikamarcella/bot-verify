@@ -87,26 +87,35 @@ module.exports = {
     .setName('say')
     .setDescription('Join voice and speak via Orpheus TTS (staff only)')
     .setDMPermission(false)
-    .addStringOption((opt) => opt.setName('text').setDescription('Text to speak').setRequired(true)),
+    .addStringOption((opt) => opt.setName('text').setDescription('Text to speak').setRequired(true))
+    .addStringOption((opt) =>
+      opt
+        .setName('lang')
+        .setDescription('Language for bot replies (default: id)')
+        .setRequired(false)
+        .addChoices({ name: 'Indonesian', value: 'id' }, { name: 'English', value: 'en' })
+    ),
 
   async execute(interaction) {
+    const langChoice = String(interaction.options.getString('lang') || 'id').toLowerCase();
+    const isEn = langChoice === 'en';
     try {
       ensureStaff(interaction);
     } catch (_) {
-      await interaction.reply({ content: 'Kamu tidak punya izin untuk perintah ini.', flags: 64 });
+      await interaction.reply({ content: isEn ? 'You do not have permission to use this command.' : 'Kamu tidak punya izin untuk perintah ini.', flags: 64 });
       return;
     }
 
     const guild = interaction.guild;
     if (!guild) {
-      await interaction.reply({ content: 'Command ini hanya bisa dipakai di server.', flags: 64 });
+      await interaction.reply({ content: isEn ? 'This command can only be used in a server.' : 'Command ini hanya bisa dipakai di server.', flags: 64 });
       return;
     }
 
     const member = await guild.members.fetch(interaction.user.id).catch(() => null);
     const channel = member?.voice?.channel;
     if (!channel) {
-      await interaction.reply({ content: 'Kamu harus join voice channel dulu.', flags: 64 });
+      await interaction.reply({ content: isEn ? 'You must join a voice channel first.' : 'Kamu harus join voice channel dulu.', flags: 64 });
       return;
     }
 
@@ -117,15 +126,19 @@ module.exports = {
       const connection = await getOrJoinConnection(interaction, channel);
       const wav = await groqTtsWav(text);
       await playWavToConnection(connection, wav);
-      await interaction.editReply({ content: '✅ Selesai bicara.' });
+      await interaction.editReply({ content: isEn ? '✅ Done.' : '✅ Selesai bicara.' });
     } catch (error) {
       const msg = String(error?.message || error || 'unknown-error');
       if (msg.includes('requires terms acceptance')) {
         await interaction.editReply({
           content:
-            'Say error: model TTS butuh persetujuan Terms di Groq.\n' +
-            'Buka dan accept terms di: https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english\n' +
-            'Setelah itu coba lagi, atau ganti model via env `GROQ_TTS_MODEL`. ',
+            isEn
+              ? 'Say error: this TTS model requires Terms acceptance in Groq.\n' +
+                'Open and accept terms: https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english\n' +
+                'Then try again, or change model via env `GROQ_TTS_MODEL`.'
+              : 'Say error: model TTS butuh persetujuan Terms di Groq.\n' +
+                'Buka dan accept terms di: https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english\n' +
+                'Setelah itu coba lagi, atau ganti model via env `GROQ_TTS_MODEL`.',
         });
         return;
       }
