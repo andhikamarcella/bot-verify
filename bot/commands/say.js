@@ -68,8 +68,17 @@ async function getOrJoinConnection(interaction, channel) {
     selfDeaf: false,
     selfMute: false,
   });
-  await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
   map.set(guild.id, connection);
+  try {
+    await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+  } catch (err) {
+    try {
+      map.delete(guild.id);
+    } catch (_) {
+      null;
+    }
+    throw err;
+  }
   return connection;
 }
 
