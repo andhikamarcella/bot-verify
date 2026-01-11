@@ -10,6 +10,7 @@ interface VerifyResponse {
   ok?: boolean;
   badgeEmoji?: string;
   mobileDeepLink?: string;
+  reviewStatus?: string;
   error?: string;
   reason?: string;
 }
@@ -53,6 +54,7 @@ export default function VerifyPage() {
 
   const [nickname, setNickname] = useState<string>('');
   const [nicknameSuggestions, setNicknameSuggestions] = useState<string[]>([]);
+  const [applicationReason, setApplicationReason] = useState<string>('');
 
   // Memoize callback untuk mencegah re-render
   const handleCaptchaSolved = useCallback((res: { type: "turnstile" | "fallbackEmoji"; value: string }) => {
@@ -210,6 +212,13 @@ export default function VerifyPage() {
   setStep(2);
   setStatusMsg(t.verifying);
 
+  const reasonTrimmed = applicationReason.trim();
+  if (reasonTrimmed.length < 10) {
+    setStep(1);
+    setStatusMsg(t.applicationReasonError);
+    return;
+  }
+
   // Get real IP address (will be handled by backend if not available)
   const body = {
     token,
@@ -217,7 +226,10 @@ export default function VerifyPage() {
       type: captchaResult.type,
       value: captchaResult.value.trim() // Ensure no whitespace
     },
-    profile: nickname.trim() ? { displayName: nickname.trim().slice(0, 32) } : undefined,
+    profile: {
+      displayName: nickname.trim() ? nickname.trim().slice(0, 32) : undefined,
+      applicationReason: applicationReason.trim() ? applicationReason.trim().slice(0, 500) : undefined,
+    },
   };
 
   try {
@@ -241,7 +253,11 @@ export default function VerifyPage() {
 
     if (data.ok) {
       setStep(3);
-      setStatusMsg(t.successMessage);
+      if (data.reviewStatus === 'INTERVIEW_REQUIRED') {
+        setStatusMsg(t.reviewInterviewMessage);
+      } else {
+        setStatusMsg(t.reviewPendingMessage);
+      }
     } else {
       setStep(1);
       // Reset captcha result untuk allow retry
@@ -469,9 +485,19 @@ export default function VerifyPage() {
                         )}
                     </div>
 
+                    <div className="space-y-2">
+                        <div className="text-xs font-semibold text-slate-200">{t.applicationReasonLabel}</div>
+                        <textarea
+                            value={applicationReason}
+                            onChange={(e) => setApplicationReason(e.target.value.slice(0, 500))}
+                            placeholder={t.applicationReasonPlaceholder}
+                            className="w-full rounded-xl bg-slate-800/40 border border-slate-700/50 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 min-h-[96px]"
+                        />
+                        <div className="text-[11px] text-slate-400">{t.applicationReasonHint}</div>
+                    </div>
+
                     <div className="flex justify-center p-4 bg-slate-800/30 rounded-2xl border border-slate-700/50">
                         <CaptchaBlock 
-                            key={step} // Force re-render when step changes
                             siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ''}
                             fallbackText={t.captchaFallback}
                             onSolved={handleCaptchaSolved}
@@ -516,7 +542,7 @@ export default function VerifyPage() {
                          <CheckCircleIcon className="w-12 h-12 text-green-500" />
                      </div>
                      <h2 className="text-2xl font-bold text-white mb-2">{t.verified}</h2>
-                     <p className="text-slate-300 mb-8">{t.successMessage}</p>
+                     <p className="text-slate-300 mb-8">{statusMsg}</p>
                      
                      <a href="discord://" className="inline-block w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-medium transition border border-slate-700">
                          {t.openDiscord}
