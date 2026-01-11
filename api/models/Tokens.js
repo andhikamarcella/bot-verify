@@ -7,6 +7,19 @@ async function getCollection() {
   return db.collection(COLLECTION_NAME);
 }
 
+async function findLatestByUserWithStatuses(userId, guildId, statuses) {
+  const collection = await getCollection();
+  const list = Array.isArray(statuses) ? statuses.filter(Boolean).map(String) : [];
+  const query = { userId: String(userId) };
+  if (guildId) {
+    query.guildId = String(guildId);
+  }
+  if (list.length) {
+    query.status = { $in: list };
+  }
+  return collection.find(query).sort({ createdAt: -1 }).limit(1).next();
+}
+
 async function createTokenDocument(doc) {
   const collection = await getCollection();
   const payload = {
@@ -15,6 +28,15 @@ async function createTokenDocument(doc) {
     guildId: doc.guildId,
     roleId: doc.roleId,
     status: doc.status || 'PENDING',
+    application: doc.application || null,
+    applicationTextLength: doc.applicationTextLength || null,
+    reviewNotes: doc.reviewNotes || null,
+    reviewedBy: doc.reviewedBy || null,
+    reviewedAt: doc.reviewedAt || null,
+    reviewDecision: doc.reviewDecision || null,
+    interviewQuestionSentAt: doc.interviewQuestionSentAt || null,
+    interviewAnswer: doc.interviewAnswer || null,
+    interviewAnsweredAt: doc.interviewAnsweredAt || null,
     extraRolesEligible: doc.extraRolesEligible || [],
     createdAt: doc.createdAt || new Date(),
     verifiedAt: doc.verifiedAt || null,
@@ -67,6 +89,22 @@ async function listRecentVerified(limit = 50) {
     .toArray();
 }
 
+async function listByStatuses(guildId, statuses, limit = 20) {
+  const collection = await getCollection();
+  const list = Array.isArray(statuses) ? statuses.filter(Boolean) : [];
+  const query = {
+    guildId: String(guildId),
+  };
+  if (list.length) {
+    query.status = { $in: list.map(String) };
+  }
+  return collection
+    .find(query)
+    .sort({ createdAt: -1 })
+    .limit(Math.max(1, Math.min(Number(limit) || 20, 100)))
+    .toArray();
+}
+
 async function listDmMessagesForUser(userId, guildId, limit = 25) {
   const collection = await getCollection();
   return collection
@@ -85,8 +123,10 @@ module.exports = {
   createTokenDocument,
   findToken,
   findLatestByUser,
+  findLatestByUserWithStatuses,
   setTokenStatus,
   listRecentVerified,
   bindIpToToken,
   listDmMessagesForUser,
+  listByStatuses,
 };
