@@ -354,10 +354,10 @@ module.exports = {
       }
     }
 
-    const apiKey = process.env.GROQ_API_KEY;
+    const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
     if (!apiKey) {
       await interaction.reply({
-        content: 'GROQ_API_KEY belum diset di environment bot.',
+        content: 'GROQ_API_KEY / GROQ_API_KEY_FALLBACK belum diset di environment bot.',
         flags: 64,
       });
       return;
