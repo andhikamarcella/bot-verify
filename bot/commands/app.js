@@ -72,6 +72,18 @@ module.exports = {
     )
     .addSubcommand((sub) =>
       sub
+        .setName('discord-pending')
+        .setDescription('List Discord built-in pending members (Membership Screening)')
+        .addIntegerOption((opt) =>
+          opt
+            .setName('limit')
+            .setDescription('Max members to fetch (default 200)')
+            .setMinValue(1)
+            .setMaxValue(1000)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
         .setName('approve')
         .setDescription('Approve by token (assign Member role)')
         .addStringOption((opt) => opt.setName('token').setDescription('Application token').setRequired(true))
@@ -144,7 +156,11 @@ module.exports = {
       const statuses = status ? [status] : ['PENDING_REVIEW', 'INTERVIEW_REQUIRED', 'INTERVIEW_ANSWERED'];
       const docs = await listByStatuses(guild.id, statuses, limit);
       if (!docs.length) {
-        await interaction.editReply({ content: 'Tidak ada aplikasi.' });
+        await interaction.editReply({
+          content:
+            'Tidak ada aplikasi dari web verify di database.\n' +
+            'Kalau yang kamu maksud adalah tab **Members > Pending** bawaan Discord, gunakan `/app discord-pending`.',
+        });
         return;
       }
 
@@ -159,6 +175,39 @@ module.exports = {
         embed.addFields({
           name: `<@${d.userId}> • ${String(d.status)}`,
           value: `len ${len} • token: ${d.token}\n${short(reason, 220)}`,
+          inline: false,
+        });
+      }
+
+      await interaction.editReply({ embeds: [embed] });
+      return;
+    }
+
+    if (sub === 'discord-pending') {
+      const limit = interaction.options.getInteger('limit') || 200;
+      const fetched = await guild.members.fetch({ limit }).catch(() => null);
+      const members = fetched ? Array.from(fetched.values()) : [];
+      const pending = members.filter((m) => Boolean(m?.pending));
+
+      if (!pending.length) {
+        await interaction.editReply({
+          content:
+            'Tidak ada member pending yang terdeteksi via bot.\n' +
+            'Catatan: Discord tidak selalu mengizinkan bot melihat data aplikasi/pertanyaan pending.\n' +
+            'Cek juga via UI Discord: Members > Pending.',
+        });
+        return;
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle('👥 Discord Pending Members')
+        .setColor(0xfaa61a)
+        .setFooter({ text: `Total (fetched): ${pending.length}` });
+
+      for (const m of pending.slice(0, 25)) {
+        embed.addFields({
+          name: `${m.user?.tag || m.id}`,
+          value: `<@${m.id}>\nJoined: ${m.joinedAt ? new Date(m.joinedAt).toISOString() : '—'}`,
           inline: false,
         });
       }
