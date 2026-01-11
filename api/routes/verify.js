@@ -2,7 +2,13 @@ const express = require('express');
 const crypto = require('crypto');
 const { Events } = require('discord.js');
 const client = require('../../bot/discordClient');
-const { createTokenDocument, findToken, setTokenStatus, bindIpToToken, listDmMessagesForUser } = require('../models/Tokens');
+const {
+  createTokenDocument,
+  findToken,
+  setTokenStatus,
+  bindIpToToken,
+  listDmMessagesForUser,
+} = require('../models/Tokens');
 const { upsertUserProfile } = require('../models/Users');
 const { insertLog } = require('../models/VerificationLog');
 const { hashIp } = require('../lib/hashIp');
@@ -379,26 +385,6 @@ router.post('/verify', async (req, res) => {
       return res.status(403).json({ ok: false, error: 'blacklisted' });
     }
 
-    const rolesToApply = new Set();
-    if (MEMBER_ROLE_ID) {
-      rolesToApply.add(MEMBER_ROLE_ID);
-    }
-    for (const roleId of record.extraRolesEligible || []) {
-      if (roleId) {
-        rolesToApply.add(roleId);
-      }
-    }
-
-    for (const roleId of rolesToApply) {
-      if (!member.roles.cache.has(roleId)) {
-        try {
-          await member.roles.add(roleId, 'Verification success');
-        } catch (roleError) {
-          console.error('Failed to assign role', roleId, roleError);
-        }
-      }
-    }
-
     const requestedDisplayName =
       submittedProfile && typeof submittedProfile === 'object' && typeof submittedProfile.displayName === 'string'
         ? submittedProfile.displayName
@@ -409,154 +395,32 @@ router.post('/verify', async (req, res) => {
       .trim()
       .slice(0, 32);
 
-    if (nicknameFromUser) {
-      try {
-        await member.setNickname(nicknameFromUser, 'User provided nickname during verification');
-      } catch (nickError) {
-        console.warn('Failed to update nickname (user provided)', nickError?.message);
-      }
+    const requestedReason =
+      submittedProfile && typeof submittedProfile === 'object' && typeof submittedProfile.applicationReason === 'string'
+        ? submittedProfile.applicationReason
+        : '';
+    const applicationReason = String(requestedReason || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 500);
+    if (applicationReason.length < 10) {
+      return res.status(400).json({ ok: false, error: 'application-reason-too-short' });
     }
 
-    if (WELCOME_CHANNEL_ID) {
-      try {
-        const channel = await guild.channels.fetch(WELCOME_CHANNEL_ID);
-        await channel.send({
-          content: `Welcome <@${record.userId}> 🎉 kamu sekarang sudah jadi Member!`,
-        });
-      } catch (welcomeError) {
-        console.error('Failed to send welcome message', welcomeError);
-      }
-    }
-
-    const now = new Date();
-    const verifiedToken = await setTokenStatus(token, 'VERIFIED', { verifiedAt: now });
-    await insertLog({
-      userId: record.userId,
-      guildId: record.guildId,
-      ipHash: hashIp(bodyIp || req.ip),
-      result: 'VERIFIED',
-    });
-
-    const accountAgeMs = Date.now() - user.createdTimestamp;
-    const accountAgeDays = Math.max(accountAgeMs / (1000 * 60 * 60 * 24), 0);
-    const riskScore = computeRiskScore({
-      accountAgeDays,
-      blacklisted: Boolean(blacklistEntry),
-      suspectReasons,
-      failedAttempts: profile?.attempts || 0,
-    });
-    await setRiskScore(record.userId, record.guildId, riskScore);
-    await upsertVerificationProfile({
-      userId: record.userId,
-      guildId: record.guildId,
-      accountCreatedAt: user.createdAt,
-      isSuspect: Boolean(profile?.isSuspect),
-      suspectReasons,
-      riskScore,
-      country: country || profile?.country || null,
-    });
-    await upsertUserProfile({
-      userId: record.userId,
-      guildId: record.guildId,
-      badgeEmoji: '🛡️',
-      badgeName: 'Verified Member',
-      suspicious: false,
-      avatarUrl: user.displayAvatarURL({ size: 256, extension: 'png' }),
-      bannerUrl: user.bannerURL({ size: 512, extension: 'png' }) || null,
-      accentColor: user.accentColor ?? null,
-      usernameSnapshot: user.username,
-      globalNameSnapshot: user.globalName || null,
-      verifiedAt: now,
-      country: country || profile?.country || null,
-      riskScore,
-    });
-
-    const dmMessages = await listDmMessagesForUser(record.userId, record.guildId, 25).catch(() => []);
-    for (const item of dmMessages) {
-      const channelId = item?.dmChannelId;
-      const messageId = item?.dmMessageId;
-      if (!channelId || !messageId) continue;
-      try {
-        const dmChannel = await client.channels.fetch(channelId);
-        if (dmChannel?.messages) {
-          const msg = await dmChannel.messages.fetch(messageId).catch(() => null);
-          if (msg) {
-            await msg.delete().catch(() => {});
-          }
-        }
-      } catch (_) {
-        // ignore
-      }
-    }
-
-    if (verifiedToken?.dmChannelId && verifiedToken?.dmMessageId) {
-      try {
-        const dmChannel = await client.channels.fetch(verifiedToken.dmChannelId);
-        if (dmChannel?.messages) {
-          const msg = await dmChannel.messages.fetch(verifiedToken.dmMessageId).catch(() => null);
-          if (msg) {
-            await msg.delete().catch(() => {});
-          }
-        }
-      } catch (_) {
-        // ignore
-      }
-    }
-
-    await clearHistoryForUser(record.userId, record.guildId).catch(() => {});
-    await insertHistoryEntry({
-      userId: record.userId,
-      guildId: record.guildId,
-      status: 'verified',
-      riskScore,
+    const applicationTextLength = applicationReason.length;
+    const reviewStatus = applicationTextLength < 100 ? 'INTERVIEW_REQUIRED' : 'PENDING_REVIEW';
+    const application = {
+      displayName: nicknameFromUser || null,
+      applicationReason,
       country: country || null,
-    });
+    };
 
-    if (config.autoNickname && !nicknameFromUser) {
-      const template = config.nicknameTemplate || '{{username}}';
-      const context = {
-        username: user.username,
-        globalName: user.globalName || '',
-        displayName: submittedProfile?.displayName || member?.displayName || user.username,
-      };
-      if (submittedProfile && typeof submittedProfile === 'object') {
-        for (const [key, value] of Object.entries(submittedProfile)) {
-          if (value === null || value === undefined) continue;
-          if (typeof value === 'string' && value.trim()) {
-            context[key] = value.trim();
-          } else if (typeof value === 'number') {
-            context[key] = String(value);
-          }
-        }
-      }
-      const rendered = renderNicknameTemplate(template, context);
-      const nickname = rendered.replace(/\s+/g, ' ').trim().slice(0, 32);
-      if (nickname) {
-        try {
-          await member.setNickname(nickname, 'Auto nickname sync after verification');
-        } catch (nickError) {
-          console.warn('Failed to update nickname', nickError?.message);
-          await insertHistoryEntry({
-            userId: record.userId,
-            guildId: record.guildId,
-            status: 'reset',
-            reason: `nickname-failed:${nickError?.code || nickError?.message}`,
-          });
-          await sendVerificationLog({
-            client,
-            guildId: record.guildId,
-            config,
-            user,
-            member,
-            type: 'failure',
-            status: 'RESET',
-            riskScore,
-            suspectReasons,
-            reason: `Nickname update failed: ${nickError?.message || nickError?.code}`,
-          });
-        }
-      }
-    }
+    await setTokenStatus(token, reviewStatus, {
+      application,
+      applicationTextLength,
+      reviewDecision: null,
+      reviewedAt: null,
+      reviewedBy: null,
+      reviewNotes: null,
+      interviewQuestionSentAt: reviewStatus === 'INTERVIEW_REQUIRED' ? new Date() : null,
+    });
 
     await sendVerificationLog({
       client,
@@ -564,28 +428,35 @@ router.post('/verify', async (req, res) => {
       config,
       user,
       member,
-      type: 'success',
-      status: 'VERIFIED',
-      riskScore,
+      type: 'info',
+      status: reviewStatus,
+      riskScore: profile?.riskScore ?? 0,
       country: country || null,
       suspectReasons,
+      reason: `Token: ${token}\nReason(${applicationTextLength}): ${applicationReason}`,
     });
 
-    try {
-      const { registerRecentVerification } = require('../../bot/bot');
-      if (typeof registerRecentVerification === 'function') {
-        registerRecentVerification(record.userId, record.guildId);
+    if (reviewStatus === 'INTERVIEW_REQUIRED') {
+      try {
+        await user.send(
+          [
+            'Aplikasimu butuh interview singkat karena jawaban kamu terlalu singkat.',
+            'Balas DM ini dengan alasan join yang lebih lengkap (minimal 100 karakter).',
+            '',
+            'Contoh: tujuan join, minat, pengalaman, dan aturan yang kamu pahami.',
+          ].join('\n')
+        );
+      } catch (_) {
+        // ignore
       }
-    } catch (regErr) {
-      console.warn('Failed to flag recent verification', regErr?.message);
     }
 
-    res.json({
+    return res.json({
       ok: true,
+      reviewStatus,
       badgeEmoji: '🛡️',
       userId: record.userId,
       mobileDeepLink: DISCORD_BROWSER_URL,
-      riskScore,
     });
   } catch (error) {
     console.error('verify error', error);
