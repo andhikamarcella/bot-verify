@@ -199,15 +199,73 @@ router.post('/create-token', async (req, res) => {
   }
 });
 
-router.post('/verify', async (req, res) => {
+router.post('/regenerate-token', async (req, res) => {
   try {
-    const { token, captchaResult, ip: bodyIp, country, profile: submittedProfile } = req.body || {};
+    const { token } = req.body || {};
     if (!token) {
       return res.status(400).json({ ok: false, error: 'missing-token' });
     }
 
     await ensureReady();
 
+    const record = await findToken(token);
+    if (!record) {
+      return res.status(400).json({ ok: false, error: 'invalid-token' });
+    }
+
+    const config = await getGuildConfig(record.guildId);
+    if (config.maintenanceMode) {
+      return res.status(503).json({
+        ok: false,
+        error: 'maintenance-mode',
+        reason: config.maintenanceReason || 'System maintenance',
+      });
+    }
+
+    const currentIpHash = hashIp(req.ip);
+    if (record.boundIp && record.boundIp !== currentIpHash) {
+      return res.status(403).json({ ok: false, error: 'link-used-on-other-device' });
+    }
+
+    const blacklistEntry = await getBlacklistEntry(record.userId, record.guildId).catch(() => null);
+    if (blacklistEntry) {
+      return res.status(403).json({ ok: false, error: 'blacklisted' });
+    }
+
+    const extraRoles = await getExtraRolesForUser(client, record.userId);
+    const newToken = crypto.randomUUID();
+    await createTokenDocument({
+      token: newToken,
+      userId: record.userId,
+      guildId: record.guildId,
+      roleId: record.roleId || MEMBER_ROLE_ID,
+      status: 'PENDING',
+      extraRolesEligible: extraRoles,
+      createdAt: new Date(),
+    });
+
+    await upsertVerificationProfile({
+      userId: record.userId,
+      guildId: record.guildId,
+      incrementAttempts: true,
+    }).catch(() => {});
+
+    await setTokenStatus(token, 'EXPIRED', { replacedBy: newToken, replacedAt: new Date() }).catch(() => {});
+
+    const verificationUrl = `${FRONTEND_URL.replace(/\/$/, '')}/verify?token=${newToken}`;
+    return res.json({ ok: true, token: newToken, verificationUrl });
+  } catch (error) {
+    console.error('regenerate-token error', error);
+    res.status(500).json({ ok: false, error: 'regenerate-token-failed' });
+  }
+});
+
+router.post('/verify', async (req, res) => {
+  try {
+    const { token, captchaResult, ip: bodyIp, country, profile: submittedProfile } = req.body || {};
+    if (!token) {
+      return res.status(400).json({ ok: false, error: 'missing-token' });
+    }
     const record = await findToken(token);
     if (!record || record.status !== 'PENDING') {
       return res.status(400).json({ ok: false, error: 'invalid-token' });
