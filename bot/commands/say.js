@@ -13,7 +13,7 @@ const { normalizeTtsText } = require('../utils/tts');
 
 const GROQ_API_BASE = 'https://api.groq.com/openai/v1';
 const DEFAULT_TTS_MODEL = process.env.GROQ_TTS_MODEL || 'canopylabs/orpheus-v1-english';
-const FALLBACK_TTS_MODEL = process.env.GROQ_TTS_MODEL_FALLBACK || 'playai/resemble-2.0';
+const FALLBACK_TTS_MODEL = process.env.GROQ_TTS_MODEL_FALLBACK || 'llava-hf/llava-34b-v1';
 const DEFAULT_TTS_VOICE = process.env.GROQ_TTS_VOICE || 'troy';
 
 if (!globalThis.__voiceConnections) {
