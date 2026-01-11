@@ -18,6 +18,7 @@ const {
 const { analyzeFirstMessageBehavior } = require('./utils/behaviorCheck');
 const { fetchConfig } = require('./utils/guildConfig');
 const { sendVerificationLog } = require('./utils/logging');
+const { hasNonEveryoneRole, isStaffMember } = require('./utils/permissions');
 const {
   markUserSuspicious,
   getUserProfile,
@@ -308,6 +309,14 @@ async function scheduleReminder(member) {
   const timer = setTimeout(async () => {
     reminderTimers.delete(key);
     try {
+      const freshMember = await member.guild.members.fetch(member.id).catch(() => member);
+
+      if (freshMember) {
+        if (isStaffMember(freshMember) || hasNonEveryoneRole(freshMember)) {
+          return;
+        }
+      }
+
       const verified = await isUserVerified(member.guild.id, member.id);
       if (verified) {
         return;
