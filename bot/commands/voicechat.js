@@ -21,6 +21,7 @@ const GROQ_CHAT_URL = `${GROQ_API_BASE}/chat/completions`;
 const DEFAULT_CHAT_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
 const DEFAULT_STT_MODEL = process.env.GROQ_STT_MODEL || 'whisper-large-v3-turbo';
 const DEFAULT_TTS_MODEL = process.env.GROQ_TTS_MODEL || 'canopylabs/orpheus-v1-english';
+const FALLBACK_TTS_MODEL = process.env.GROQ_TTS_MODEL_FALLBACK || 'playai/resemble-2.0';
 const DEFAULT_TTS_VOICE = process.env.GROQ_TTS_VOICE || 'troy';
 
 const sessions = new Map();
@@ -61,26 +62,40 @@ async function groqTtsWav(text, lang) {
 
   const normalized = normalizeTtsText(text, lang);
 
-  const res = await fetch(`${GROQ_API_BASE}/audio/speech`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: DEFAULT_TTS_MODEL,
-      voice: DEFAULT_TTS_VOICE,
-      input: String(normalized || '').slice(0, 900),
-      response_format: 'wav',
-    }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`tts-failed:${res.status}:${errText.slice(0, 200)}`);
+  async function attempt(model) {
+    const res = await fetch(`${GROQ_API_BASE}/audio/speech`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        voice: DEFAULT_TTS_VOICE,
+        input: String(normalized || '').slice(0, 900),
+        response_format: 'wav',
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`tts-failed:${res.status}:${errText.slice(0, 200)}`);
+    }
+    return Buffer.from(await res.arrayBuffer());
   }
 
-  return Buffer.from(await res.arrayBuffer());
+  try {
+    return await attempt(DEFAULT_TTS_MODEL);
+  } catch (err) {
+    const msg = String(err.message || '');
+    if (msg.includes('429') && FALLBACK_TTS_MODEL && FALLBACK_TTS_MODEL !== DEFAULT_TTS_MODEL) {
+      try {
+        return await attempt(FALLBACK_TTS_MODEL);
+      } catch (fallbackErr) {
+        throw fallbackErr;
+      }
+    }
+    throw err;
+  }
 }
 
 async function groqTranscribe(fileBuffer, filename, language) {
