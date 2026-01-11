@@ -9,6 +9,36 @@ function hasAtLeastRole(member, roleId) {
   return highest.position >= role.position;
 }
 
+function hasNonEveryoneRole(member) {
+  const cache = member?.roles?.cache;
+  const guildId = member?.guild?.id;
+  if (!cache || !guildId) return false;
+  return cache.some((role) => role?.id && role.id !== guildId);
+}
+
+function isStaffMember(member) {
+  if (!member) return false;
+
+  if (member.guild?.ownerId && member.id === member.guild.ownerId) {
+    return true;
+  }
+
+  if (
+    member.permissions?.has(PermissionFlagsBits.Administrator) ||
+    member.permissions?.has(PermissionFlagsBits.ManageGuild)
+  ) {
+    return true;
+  }
+
+  const adminRoleId = process.env.ADMIN_ROLE_ID || '873576371249627136';
+  const staffRoleIds = [process.env.STAFF_ROLE_ID, adminRoleId].filter(Boolean);
+  const cache = member.roles?.cache;
+  for (const roleId of staffRoleIds) {
+    if (cache?.has?.(roleId)) return true;
+  }
+  return false;
+}
+
 function isStaff(interaction) {
   if (!interaction?.inGuild?.() || !interaction.member) return false;
 
@@ -63,7 +93,9 @@ function ensureMemberOrHigher(interaction) {
 
 module.exports = {
   hasAtLeastRole,
+  hasNonEveryoneRole,
   isStaff,
+  isStaffMember,
   ensureStaff,
   isMemberOrHigher,
   ensureMemberOrHigher,
