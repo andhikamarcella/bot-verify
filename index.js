@@ -9,6 +9,16 @@
  * Pastikan MongoDB Atlas URI sudah diisi pada MONGO_URI atau gunakan cluster lokal sendiri.
  */
 require('dotenv').config();
+
+try {
+  const ffmpegPath = require('ffmpeg-static');
+  if (ffmpegPath && !process.env.FFMPEG_PATH) {
+    process.env.FFMPEG_PATH = ffmpegPath;
+  }
+} catch (_) {
+  // ignore
+}
+
 const { startBot } = require('./bot/bot');
 const { startApiServer } = require('./api');
 const { connectMongo } = require('./api/lib/db');
