@@ -20,7 +20,7 @@ if (!globalThis.__voiceConnections) {
 }
 
 async function groqTtsWav(text, lang) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
   if (!apiKey) throw new Error('missing-groq-api-key');
 
   const normalized = normalizeTtsText(text, lang);
