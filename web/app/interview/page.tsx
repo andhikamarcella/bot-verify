@@ -48,6 +48,23 @@ export default function InterviewPage() {
     fetchInterviewStatus(tokenParam);
   }, []);
 
+  const getStatusText = (status?: string) => {
+    switch (status) {
+      case 'INTERVIEW_REQUIRED':
+        return 'Interview Diperlukan';
+      case 'INTERVIEW_ANSWERED':
+        return 'Jawaban Terkirim';
+      case 'PENDING_REVIEW':
+        return 'Menunggu Review';
+      case 'VERIFIED':
+        return 'Terverifikasi';
+      case 'REJECTED':
+        return 'Ditolak';
+      default:
+        return 'Status Tidak Diketahui';
+    }
+  };
+
   const fetchInterviewStatus = async (tokenValue: string) => {
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:3001'}/api/interview-status?token=${encodeURIComponent(tokenValue)}`);
@@ -143,97 +160,130 @@ export default function InterviewPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-      <div className="max-w-md w-full">
-        <div className="bg-slate-900 border border-slate-700/30 p-8 rounded-2xl shadow-2xl">
-          {/* Header */}
-          <div className="text-center mb-8">
-            {guildIcon ? (
-              <img src={guildIcon} alt={guildName} className="w-16 h-16 rounded-full mx-auto mb-4 border-2 border-white/30" />
-            ) : (
-              <div className="w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-500 rounded-full mx-auto mb-4 flex items-center justify-center">
-                <span className="text-white text-2xl font-bold">{guildName.charAt(0)}</span>
+    <main className="min-h-screen bg-[#050505] text-slate-200 font-sans flex items-center justify-center p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] relative overflow-hidden">
+      {/* Background Ambience */}
+      <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
+        <div className="absolute top-[-10%] left-[20%] w-[500px] h-[500px] bg-cyan-500/10 rounded-full blur-[100px]" />
+        <div className="absolute bottom-[-10%] right-[20%] w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[100px]" />
+      </div>
+
+      <div className="relative z-10 w-full max-w-md bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+        
+        {/* Header */}
+        <div className="p-6 border-b border-slate-700/50 bg-slate-900/50">
+          <div className="flex justify-between items-start mb-4">
+            <div className="flex items-center gap-3">
+              {guildIcon ? (
+                <img src={guildIcon} alt="Icon" className="w-12 h-12 rounded-xl border border-slate-600 shadow-lg" />
+              ) : (
+                <div className="w-12 h-12 rounded-xl bg-slate-800" />
+              )}
+              <div>
+                <h1 className="text-lg font-bold text-white leading-tight">{guildName}</h1>
+                <p className="text-xs text-cyan-400 font-medium">Interview Status</p>
               </div>
-            )}
-            <h1 className="text-3xl font-bold text-white mb-2">Interview Verification</h1>
-            <p className="text-white/80">{guildName}</p>
-          </div>
-
-          {/* Status Message */}
-          <div className={`mb-6 p-4 rounded-lg flex items-center space-x-3 ${
-            interviewData?.status === 'VERIFIED' ? 'bg-green-500/20 text-green-100' :
-            interviewData?.status === 'REJECTED' ? 'bg-red-500/20 text-red-100' :
-            'bg-blue-500/20 text-blue-100'
-          }`}>
-            {interviewData?.status === 'VERIFIED' && <CheckCircleIcon className="w-6 h-6" />}
-            {interviewData?.status === 'REJECTED' && <ExclamationTriangleIcon className="w-6 h-6" />}
-            {interviewData?.status !== 'VERIFIED' && interviewData?.status !== 'REJECTED' && <ClockIcon className="w-6 h-6" />}
-            <span className="text-sm">{status}</span>
-          </div>
-
-          {/* Interview Link Button */}
-          {interviewData?.status === 'INTERVIEW_REQUIRED' && interviewData.interviewLink && (
-            <div className="space-y-4">
-              <a
-                href={interviewData.interviewLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-purple-700 hover:to-pink-700 transition-all duration-200 text-center block"
-              >
-                Buka Form Interview
-              </a>
-              
+            </div>
+            {/* Language Switcher */}
+            <div className="flex bg-slate-800 rounded-lg p-1">
               <button
-                onClick={() => copyToClipboard(interviewData.interviewLink!)}
-                className="w-full bg-white/10 text-white py-3 px-6 rounded-lg font-semibold hover:bg-white/20 transition-all duration-200 flex items-center justify-center space-x-2"
+                onClick={() => setLocale('id')}
+                className={`px-2 py-1 text-xs rounded-md transition ${
+                  locale === 'id' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
+                }`}
               >
-                <ClipboardDocumentIcon className="w-5 h-5" />
-                <span>Salin Link Interview</span>
+                ID
+              </button>
+              <button
+                onClick={() => setLocale('en')}
+                className={`px-2 py-1 text-xs rounded-md transition ${
+                  locale === 'en' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                EN
               </button>
             </div>
-          )}
-
-          {/* Interview Submitted Info */}
-          {interviewData?.status === 'INTERVIEW_ANSWERED' && interviewData.interviewSubmittedAt && (
-            <div className="bg-white/5 rounded-lg p-4">
-              <p className="text-white/80 text-sm mb-2">Interview dikirim pada:</p>
-              <p className="text-white font-medium">
-                {new Date(interviewData.interviewSubmittedAt).toLocaleString('id-ID', {
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit'
-                })}
-              </p>
-            </div>
-          )}
-
-          {/* Review Status */}
-          {interviewData?.reviewStatus && (
-            <div className="bg-white/5 rounded-lg p-4">
-              <p className="text-white/80 text-sm mb-2">Status Review:</p>
-              <p className="text-white font-medium">{interviewData.reviewStatus}</p>
-            </div>
-          )}
-
-          {/* Token Info */}
-          {token && (
-            <div className="mt-6 pt-6 border-t border-white/10">
-              <p className="text-white/60 text-xs text-center">
-                Token: {token.slice(0, 8)}...{token.slice(-4)}
-              </p>
-            </div>
-          )}
-
-          {/* Help Text */}
-          <div className="mt-6 text-center">
-            <p className="text-white/60 text-sm">
-              Butuh bantuan? Hubungi staff server.
-            </p>
           </div>
         </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-6">
+          {!interviewData ? (
+            <div className="text-center py-8">
+              <div className="animate-spin h-8 w-8 border-2 border-cyan-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+              <p className="text-slate-400">Memuat status interview...</p>
+            </div>
+          ) : (
+            <>
+              {/* Status Card */}
+              <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+                <div className="flex items-center gap-3 mb-3">
+                  {interviewData.status === 'VERIFIED' ? (
+                    <CheckCircleIcon className="h-6 w-6 text-green-500" />
+                  ) : interviewData.status === 'REJECTED' ? (
+                    <ExclamationTriangleIcon className="h-6 w-6 text-red-500" />
+                  ) : (
+                    <ClockIcon className="h-6 w-6 text-cyan-500" />
+                  )}
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Status Interview</h3>
+                    <p className="text-xs text-slate-400">{getStatusText(interviewData.status)}</p>
+                  </div>
+                </div>
+                
+                {interviewData.interviewSubmittedAt && (
+                  <div className="text-xs text-slate-500 mt-2">
+                    <span>Dikirim: {new Date(interviewData.interviewSubmittedAt).toLocaleString('id-ID')}</span>
+                  </div>
+                )}
+                
+                {interviewData.reviewStatus && (
+                  <div className="mt-3 p-3 bg-slate-900/50 rounded-lg border border-slate-600/50">
+                    <p className="text-xs text-cyan-400 font-medium mb-1">Review Status:</p>
+                    <p className="text-xs text-slate-300">{interviewData.reviewStatus}</p>
+                    {interviewData.reason && (
+                      <p className="text-xs text-slate-400 mt-1">{interviewData.reason}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Interview Link */}
+              {interviewData.interviewLink && (
+                <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+                  <h3 className="text-sm font-semibold text-white mb-3">Form Interview</h3>
+                  <div className="space-y-3">
+                    <a
+                      href={interviewData.interviewLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block w-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-medium py-3 px-4 rounded-xl text-center transition-all duration-200 shadow-[0_0_15px_rgba(34,211,238,0.3)]"
+                    >
+                      Buka Form Interview
+                    </a>
+                    
+                    <button
+                      onClick={() => copyToClipboard(interviewData.interviewLink!)}
+                      className="w-full bg-slate-700 hover:bg-slate-600 text-white font-medium py-3 px-4 rounded-xl text-center transition-all duration-200 flex items-center justify-center gap-2"
+                    >
+                      <ClipboardDocumentIcon className="w-4 h-4" />
+                      Salin Link Interview
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Additional Info */}
+              {interviewData.status === 'INTERVIEW_REQUIRED' && (
+                <div className="bg-cyan-500/5 p-4 rounded-xl border border-cyan-500/10">
+                  <p className="text-xs text-cyan-300">
+                    <strong>Penting:</strong> Silakan isi form interview secepatnya untuk melanjutkan proses verifikasi.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </main>
   );
 }
