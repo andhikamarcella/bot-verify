@@ -176,10 +176,16 @@ function pcmToWavBuffer(pcmBuffer, { channels, sampleRate }) {
 
 async function ensureEveryoneVoiceAccess(guild) {
   const voiceChannelId = process.env.VOICEVERIFY_CHANNEL_ID;
-  if (!voiceChannelId) return;
+  if (!voiceChannelId) {
+    console.log('[VoiceVerify] VOICEVERIFY_CHANNEL_ID not set, skipping permission setup');
+    return;
+  }
 
   const voiceChannel = guild.channels.cache.get(voiceChannelId) || await guild.channels.fetch(voiceChannelId).catch(() => null);
-  if (!voiceChannel || !voiceChannel.isVoiceBased()) return;
+  if (!voiceChannel || !voiceChannel.isVoiceBased()) {
+    console.error(`[VoiceVerify] Voice channel ${voiceChannelId} not found or not voice-based`);
+    return;
+  }
 
   try {
     // Get @everyone role
@@ -192,7 +198,7 @@ async function ensureEveryoneVoiceAccess(guild) {
       ViewChannel: true,
     }, 'Voice verification access');
     
-    console.log('[VoiceVerify] Updated @everyone permissions for voice channel');
+    console.log(`[VoiceVerify] Updated @everyone permissions for voice channel ${voiceChannel.name} (${voiceChannelId})`);
   } catch (err) {
     console.error('[VoiceVerify] Failed to update voice channel permissions:', err);
   }
@@ -363,11 +369,23 @@ module.exports = {
             return;
           } catch (moveErr) {
             console.error('[VoiceVerify] Failed to move user to voice channel:', moveErr);
+            await interaction.reply({ 
+              content: `Gagal memindahkan ke voice channel. Error: ${moveErr.message}. Pastikan bot punya permission Move Members dan user tidak di-lock.`, 
+              flags: 64 
+            });
+            return;
           }
+        } else {
+          console.error(`[VoiceVerify] Voice channel ${voiceChannelId} not found or not voice-based`);
         }
+      } else {
+        console.log('[VoiceVerify] VOICEVERIFY_CHANNEL_ID not set');
       }
       
-      await interaction.reply({ content: 'Kamu harus join voice channel dulu. Jika gabisa masuk, hubungi staff untuk permission voice channel.', flags: 64 });
+      await interaction.reply({ 
+        content: 'Kamu harus join voice channel dulu. Jika gabisa masuk, hubungi staff untuk permission voice channel. Pastikan voice channel verifikasi sudah diset di VOICEVERIFY_CHANNEL_ID.', 
+        flags: 64 
+      });
       return;
     }
 
@@ -389,6 +407,8 @@ module.exports = {
       selfMute: false,
     });
 
+    console.log(`[VoiceVerify] Joining voice channel ${channel.name} (${channel.id}) for user ${interaction.user.tag}`);
+
     sessions.set(key, { connection, tmpPath, attempts: 0, code, guildId: guild.id });
     try {
       globalThis.__voiceConnections.set(guild.id, connection);
@@ -399,16 +419,22 @@ module.exports = {
     await interaction.deferReply({ flags: 64 });
 
     try {
+      console.log('[VoiceVerify] Waiting for voice connection to be ready...');
       await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+      console.log('[VoiceVerify] Voice connection is ready');
 
       const prompt =
         langChoice === 'en'
           ? `Hello. Please say the digits: ${digitsWithHyphens(code)}.`
           : `Halo. Sebutkan angka: ${digitsWithHyphens(code)}.`;
       try {
+        console.log('[VoiceVerify] Generating TTS for prompt...');
         const wav = await groqTtsWav(prompt, langChoice);
+        console.log('[VoiceVerify] Playing TTS to voice channel...');
         await playWavToConnection(connection, wav);
+        console.log('[VoiceVerify] TTS played successfully');
       } catch (error) {
+        console.error('[VoiceVerify] TTS error:', error);
         // fallback: still proceed with text instruction
         await interaction.followUp({
           content:
@@ -424,10 +450,15 @@ module.exports = {
         if (!session) throw new Error('session-ended');
         session.attempts += 1;
 
+        console.log(`[VoiceVerify] Recording attempt ${session.attempts}/${maxAttempts} for user ${interaction.user.tag}`);
         await recordUserToWav(connection, interaction.user.id, tmpPath);
+        console.log('[VoiceVerify] Recording completed, transcribing...');
+        
         const oggBuf = await fs.promises.readFile(tmpPath);
         const transcript = await groqTranscribe(oggBuf, path.basename(tmpPath), sttLang);
         const answer = normalizeAnswer(transcript);
+        
+        console.log(`[VoiceVerify] Transcript: "${transcript}" => "${answer}" (expected: "${code}")`);
 
         if (answer === code) {
           const botMember = guild.members.me || (await guild.members.fetchMe().catch(() => null));
@@ -497,10 +528,12 @@ module.exports = {
         });
       }
     } catch (error) {
+      console.error('[VoiceVerify] Voice verification error:', error);
       await interaction.editReply({
-        content: `Voice verify error: ${error?.message || error}`,
+        content: `Voice verify error: ${error?.message || error}. Pastikan bot punya permission Voice Channel dan user sudah join voice.`,
       });
     } finally {
+      console.log('[VoiceVerify] Cleaning up session...');
       await cleanupSession(key);
     }
   },
