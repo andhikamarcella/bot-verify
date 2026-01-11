@@ -9,6 +9,7 @@ const {
 } = require('@discordjs/voice');
 const { Readable } = require('stream');
 const { ensureStaff } = require('../utils/permissions');
+const { normalizeTtsText } = require('../utils/tts');
 
 const GROQ_API_BASE = 'https://api.groq.com/openai/v1';
 const DEFAULT_TTS_MODEL = process.env.GROQ_TTS_MODEL || 'canopylabs/orpheus-v1-english';
@@ -18,9 +19,11 @@ if (!globalThis.__voiceConnections) {
   globalThis.__voiceConnections = new Map();
 }
 
-async function groqTtsWav(text) {
+async function groqTtsWav(text, lang) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('missing-groq-api-key');
+
+  const normalized = normalizeTtsText(text, lang);
 
   const res = await fetch(`${GROQ_API_BASE}/audio/speech`, {
     method: 'POST',
@@ -31,7 +34,7 @@ async function groqTtsWav(text) {
     body: JSON.stringify({
       model: DEFAULT_TTS_MODEL,
       voice: DEFAULT_TTS_VOICE,
-      input: String(text || '').slice(0, 200),
+      input: String(normalized || '').slice(0, 600),
       response_format: 'wav',
     }),
   });
@@ -124,7 +127,7 @@ module.exports = {
 
     try {
       const connection = await getOrJoinConnection(interaction, channel);
-      const wav = await groqTtsWav(text);
+      const wav = await groqTtsWav(text, langChoice);
       await playWavToConnection(connection, wav);
       await interaction.editReply({ content: isEn ? '✅ Done.' : '✅ Selesai bicara.' });
     } catch (error) {
