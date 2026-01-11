@@ -6,11 +6,16 @@ import { CaptchaBlock } from "../../components/CaptchaBlock";
 import { PolicyModal } from "../../components/PolicyModal";
 import { CheckCircleIcon, ExclamationTriangleIcon, ClockIcon, ShieldCheckIcon } from '@heroicons/react/24/solid';
 
+declare const process: {
+  env: Record<string, string | undefined>;
+};
+
 interface VerifyResponse {
   ok?: boolean;
   badgeEmoji?: string;
   mobileDeepLink?: string;
   reviewStatus?: string;
+  userId?: string;
   error?: string;
   reason?: string;
 }
@@ -56,6 +61,13 @@ export default function VerifyPage() {
   const [nicknameSuggestions, setNicknameSuggestions] = useState<string[]>([]);
   const [applicationReason, setApplicationReason] = useState<string>('');
 
+  const [startedVerification, setStartedVerification] = useState<boolean>(false);
+  const [autoRefreshUsed, setAutoRefreshUsed] = useState<boolean>(false);
+  const [regeneratingToken, setRegeneratingToken] = useState<boolean>(false);
+  const [completedAt, setCompletedAt] = useState<string>('');
+  const [completedUserId, setCompletedUserId] = useState<string>('');
+  const [pageUrl, setPageUrl] = useState<string>('');
+
   // Memoize callback untuk mencegah re-render
   const handleCaptchaSolved = useCallback((res: { type: "turnstile" | "fallbackEmoji"; value: string }) => {
     console.log('[Captcha] handleCaptchaSolved called', { 
@@ -100,6 +112,8 @@ export default function VerifyPage() {
     const params = new URLSearchParams(window.location.search);
     const tParam = params.get("token");
     setToken(tParam || null);
+
+    setPageUrl(window.location.href);
     
     const base = process.env.NEXT_PUBLIC_API_BASE_URL || "";
     
@@ -158,6 +172,75 @@ export default function VerifyPage() {
 
   }, [t]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const securityBlurb =
+    locale === 'id'
+      ? 'Kami memeriksa tautan verifikasi, status bot, dan captcha untuk melindungi server.'
+      : 'We validate your verification link, bot status, and captcha to protect the server.';
+
+  const openInBrowserLabel = locale === 'id' ? 'Buka di browser' : 'Open in browser';
+  const generateNewTokenLabel = locale === 'id' ? 'Generate token baru' : 'Generate new token';
+  const tokenRefreshedLabel =
+    locale === 'id'
+      ? 'Token diperbarui. Silakan lanjutkan verifikasi.'
+      : 'Token refreshed. Please continue verification.';
+
+  const maskUserId = (value: string) => {
+    const s = String(value || '');
+    if (s.length <= 8) return s;
+    return `${s.slice(0, 4)}••••${s.slice(-4)}`;
+  };
+
+  const regenerateToken = useCallback(
+    async (opts: { silent?: boolean } = {}) => {
+      if (!token) return null;
+      if (regeneratingToken) return null;
+
+      const base = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+      setRegeneratingToken(true);
+      try {
+        const res = await fetch((base ? `${base}/api/regenerate-token` : '/api/regenerate-token'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        });
+        const data = await res.json();
+        if (!data?.ok || !data?.token) {
+          if (!opts.silent) {
+            setStatusMsg(t.verifyFailed + (data?.error ? ` (${data.error})` : ''));
+          }
+          return null;
+        }
+
+        const newToken = String(data.token);
+        setToken(newToken);
+        setTimeLeft(15 * 60 * 1000);
+        setStatusMsg(tokenRefreshedLabel);
+        setCaptchaResult(null);
+        setStartedVerification(false);
+        setAutoRefreshUsed(false);
+
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set('token', newToken);
+          window.history.replaceState({}, '', url.toString());
+          setPageUrl(url.toString());
+        } catch (_) {
+          // ignore
+        }
+
+        return newToken;
+      } catch (_) {
+        if (!opts.silent) {
+          setStatusMsg(t.errors.apiTimeout);
+        }
+        return null;
+      } finally {
+        setRegeneratingToken(false);
+      }
+    },
+    [token, regeneratingToken, t.verifyFailed, t.errors.apiTimeout, tokenRefreshedLabel]
+  );
+
   // Timer Countdown
   useEffect(() => {
     if (timeLeft === null || timeLeft <= 0) return;
@@ -179,8 +262,9 @@ export default function VerifyPage() {
       return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  async function handleVerify() {
-  if (!token || !captchaResult) {
+  const handleVerify = useCallback(async (tokenOverride?: string) => {
+  const activeToken = tokenOverride || token;
+  if (!activeToken || !captchaResult) {
     console.warn('[Verify] Missing token or captchaResult', { token: !!token, captchaResult: !!captchaResult });
     return;
   }
@@ -202,13 +286,14 @@ export default function VerifyPage() {
   }
 
   console.log('[Verify] Starting verification', { 
-    token: token.substring(0, 10) + '...', 
+    token: activeToken.substring(0, 10) + '...', 
     captchaType: captchaResult.type,
     hasValue: !!captchaResult.value,
     tokenLength: captchaResult.value.length,
     timestamp: new Date().toISOString()
   });
 
+  setStartedVerification(true);
   setStep(2);
   setStatusMsg(t.verifying);
 
@@ -221,7 +306,7 @@ export default function VerifyPage() {
 
   // Get real IP address (will be handled by backend if not available)
   const body = {
-    token,
+    token: activeToken,
     captchaResult: {
       type: captchaResult.type,
       value: captchaResult.value.trim() // Ensure no whitespace
@@ -253,6 +338,8 @@ export default function VerifyPage() {
 
     if (data.ok) {
       setStep(3);
+      setCompletedAt(new Date().toISOString());
+      setCompletedUserId(data.userId ? String(data.userId) : '');
       if (data.reviewStatus === 'INTERVIEW_REQUIRED') {
         setStatusMsg(t.reviewInterviewMessage);
       } else {
@@ -269,6 +356,22 @@ export default function VerifyPage() {
           errorMessage = `${t.envCheck.maintenance}: ${data.reason || ''}`;
         } else if (data.error === 'application-reason-too-short') {
           errorMessage = t.applicationReasonError;
+        } else if (data.error === 'token-expired') {
+          if (startedVerification && !autoRefreshUsed) {
+            setAutoRefreshUsed(true);
+            setStep(2);
+            setStatusMsg(locale === 'id' ? 'Token kadaluarsa, memperbarui token...' : 'Token expired, refreshing token...');
+            const newToken = await regenerateToken({ silent: true });
+            if (newToken) {
+              setStep(1);
+              setStatusMsg(tokenRefreshedLabel);
+            } else {
+              setStep(1);
+              errorMessage = t.tokenExpired;
+            }
+          } else {
+            errorMessage = t.tokenExpired;
+          }
         } else if (data.error === "captcha-invalid") {
           // Show more specific error message
           const reason = data.reason || '';
@@ -297,7 +400,27 @@ export default function VerifyPage() {
     setCaptchaResult(null);
     setStatusMsg(t.errors.apiTimeout);
   }
-}
+}, [
+  token,
+  captchaResult,
+  t.captchaMissing,
+  t.verifyFailed,
+  t.verifying,
+  t.applicationReasonError,
+  t.reviewInterviewMessage,
+  t.reviewPendingMessage,
+  t.errors.apiTimeout,
+  t.envCheck.maintenance,
+  t.tokenExpired,
+  t.errors.linkUsed,
+  startedVerification,
+  autoRefreshUsed,
+  regenerateToken,
+  tokenRefreshedLabel,
+  locale,
+  applicationReason,
+  nickname,
+]);
 
   // --- UI Renders ---
 
@@ -340,8 +463,36 @@ export default function VerifyPage() {
       );
   }
 
+  const botOnline = Boolean(envStatus?.botOnline);
+  const tokenValid = Boolean(token && timeLeft !== null && timeLeft > 0);
+  const reasonOk = applicationReason.trim().length >= 10;
+  const captchaOk = Boolean(captchaResult?.value);
+
+  const checklist = [
+    {
+      label: locale === 'id' ? 'Bot online' : 'Bot online',
+      state: botOnline ? 'done' : 'fail',
+    },
+    {
+      label: locale === 'id' ? 'Link valid' : 'Link valid',
+      state: tokenValid ? 'done' : timeLeft === 0 ? 'fail' : 'pending',
+    },
+    {
+      label: locale === 'id' ? 'Form lengkap' : 'Form complete',
+      state: reasonOk ? 'done' : 'pending',
+    },
+    {
+      label: locale === 'id' ? 'Captcha selesai' : 'Captcha solved',
+      state: captchaOk ? 'done' : 'pending',
+    },
+    {
+      label: locale === 'id' ? 'Validasi akhir' : 'Final validation',
+      state: step === 3 ? 'done' : step === 2 ? 'pending' : 'pending',
+    },
+  ];
+
   return (
-    <main className="min-h-screen bg-[#050505] text-slate-200 font-sans flex items-center justify-center p-4 relative overflow-hidden">
+    <main className="min-h-screen bg-[#050505] text-slate-200 font-sans flex items-center justify-center p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] relative overflow-hidden">
       {/* Background Ambience */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
           <div className="absolute top-[-10%] left-[20%] w-[500px] h-[500px] bg-cyan-500/10 rounded-full blur-[100px]" />
@@ -458,6 +609,24 @@ export default function VerifyPage() {
                         <p className="text-sm text-slate-400">{t.captchaMissing}</p>
                     </div>
 
+                    <div className="bg-slate-800/25 p-4 rounded-xl border border-slate-700/40">
+                        <div className="text-xs text-slate-300 leading-relaxed">{securityBlurb}</div>
+                        <div className="mt-3 space-y-2">
+                            {checklist.map((item) => {
+                                const isDone = item.state === 'done';
+                                const isFail = item.state === 'fail';
+                                return (
+                                    <div key={item.label} className="flex items-center justify-between text-[11px]">
+                                        <span className="text-slate-300">{item.label}</span>
+                                        <span className={isDone ? 'text-green-400' : isFail ? 'text-red-400' : 'text-slate-400'}>
+                                            {isDone ? '✅' : isFail ? '❌' : '⏳'}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
                     <div className="space-y-2">
                         <div className="text-xs font-semibold text-slate-200">{t.nicknameLabel}</div>
                         <input
@@ -506,15 +675,37 @@ export default function VerifyPage() {
                         />
                     </div>
 
-                    {captchaResult && captchaResult.value && (
-                         <button
-  onClick={() => handleVerify()}
-  disabled={!captchaResult || !captchaResult.value}
-  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
->
-  {t.button}
-</button>
-                    )}
+                    <div className="sticky bottom-0 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] bg-slate-900/80 backdrop-blur-xl rounded-xl">
+                        {captchaResult && captchaResult.value && (
+                            <button
+                                onClick={() => handleVerify()}
+                                disabled={!captchaResult || !captchaResult.value}
+                                className="w-full py-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
+                            >
+                                {t.button}
+                            </button>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                            <button
+                                type="button"
+                                onClick={() => regenerateToken()}
+                                disabled={!token || regeneratingToken}
+                                className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium transition border border-slate-700 disabled:opacity-50"
+                            >
+                                {regeneratingToken ? t.verifying : generateNewTokenLabel}
+                            </button>
+
+                            <a
+                                href={pageUrl || 'about:blank'}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium transition border border-slate-700 text-center"
+                            >
+                                {openInBrowserLabel}
+                            </a>
+                        </div>
+                    </div>
                     
                     <button onClick={() => {
                         setStep(0);
@@ -545,6 +736,17 @@ export default function VerifyPage() {
                      </div>
                      <h2 className="text-2xl font-bold text-white mb-2">{t.verified}</h2>
                      <p className="text-slate-300 mb-8">{statusMsg}</p>
+
+                     <div className="mb-6 text-left text-xs text-slate-300 bg-slate-800/30 rounded-xl border border-slate-700/50 p-4">
+                        <div className="flex justify-between gap-3">
+                            <div className="text-slate-400">{locale === 'id' ? 'Waktu' : 'Time'}</div>
+                            <div className="font-mono text-slate-200">{completedAt ? new Date(completedAt).toLocaleString() : '—'}</div>
+                        </div>
+                        <div className="flex justify-between gap-3 mt-2">
+                            <div className="text-slate-400">{locale === 'id' ? 'Discord ID' : 'Discord ID'}</div>
+                            <div className="font-mono text-slate-200">{completedUserId ? maskUserId(completedUserId) : '—'}</div>
+                        </div>
+                     </div>
                      
                      <a href="discord://" className="inline-block w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-medium transition border border-slate-700">
                          {t.openDiscord}
@@ -563,6 +765,11 @@ export default function VerifyPage() {
         <div className="p-4 bg-slate-950/30 border-t border-slate-800 text-center">
             <p className="text-[10px] text-slate-600">
                 {t.antiScam}
+            </p>
+            <p className="text-[10px] text-slate-600 mt-1">
+                {locale === 'id'
+                    ? 'Kami tidak pernah meminta password Discord atau kode OTP.'
+                    : 'We never ask for your Discord password or OTP code.'}
             </p>
             <p className="text-[10px] text-slate-700 mt-1">v1.4.2 &bull; {t.footer}</p>
         </div>
