@@ -56,7 +56,7 @@ function pcmToWavBuffer(pcmBuffer, { channels, sampleRate }) {
 }
 
 async function groqTtsWav(text, lang) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
   if (!apiKey) throw new Error('missing-groq-api-key');
 
   const normalized = normalizeTtsText(text, lang);
@@ -84,7 +84,7 @@ async function groqTtsWav(text, lang) {
 }
 
 async function groqTranscribe(fileBuffer, filename, language) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
   if (!apiKey) throw new Error('missing-groq-api-key');
 
   const form = new FormData();
@@ -117,7 +117,7 @@ async function groqTranscribe(fileBuffer, filename, language) {
 }
 
 async function callGroqChat({ messages, model }) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
   if (!apiKey) throw new Error('missing-groq-api-key');
 
   const res = await fetch(GROQ_CHAT_URL, {
@@ -274,9 +274,9 @@ module.exports = {
       return;
     }
 
-    const apiKey = process.env.GROQ_API_KEY;
+    const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
     if (!apiKey) {
-      await interaction.reply({ content: 'GROQ_API_KEY belum diset di environment bot.', flags: 64 });
+      await interaction.reply({ content: 'GROQ_API_KEY / GROQ_API_KEY_FALLBACK belum diset di environment bot.', flags: 64 });
       return;
     }
 
