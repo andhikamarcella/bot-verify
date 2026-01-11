@@ -15,6 +15,7 @@ const prism = require('prism-media');
 const { SlashCommandBuilder } = require('discord.js');
 const { fetchConfig } = require('../utils/guildConfig');
 const { sendVerificationLog } = require('../utils/logging');
+const { normalizeTtsText } = require('../utils/tts');
 
 const GROQ_API_BASE = 'https://api.groq.com/openai/v1';
 const DEFAULT_STT_MODEL = process.env.GROQ_STT_MODEL || 'whisper-large-v3-turbo';
@@ -85,9 +86,11 @@ function normalizeAnswer(raw) {
   return result;
 }
 
-async function groqTtsWav(text) {
+async function groqTtsWav(text, lang) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('missing-groq-api-key');
+
+  const normalized = normalizeTtsText(text, lang);
 
   const res = await fetch(`${GROQ_API_BASE}/audio/speech`, {
     method: 'POST',
@@ -98,7 +101,7 @@ async function groqTtsWav(text) {
     body: JSON.stringify({
       model: DEFAULT_TTS_MODEL,
       voice: DEFAULT_TTS_VOICE,
-      input: String(text || '').slice(0, 200),
+      input: String(normalized || '').slice(0, 600),
       response_format: 'wav',
     }),
   });
@@ -361,7 +364,7 @@ module.exports = {
           ? `Hello. Please say the digits: ${digitsWithHyphens(code)}.`
           : `Halo. Sebutkan angka: ${digitsWithHyphens(code)}.`;
       try {
-        const wav = await groqTtsWav(prompt);
+        const wav = await groqTtsWav(prompt, langChoice);
         await playWavToConnection(connection, wav);
       } catch (error) {
         // fallback: still proceed with text instruction
