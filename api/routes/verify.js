@@ -8,6 +8,7 @@ const {
   setTokenStatus,
   bindIpToToken,
   listDmMessagesForUser,
+  clearTokenDmFields,
 } = require('../models/Tokens');
 const { upsertUserProfile } = require('../models/Users');
 const { insertLog } = require('../models/VerificationLog');
@@ -421,6 +422,29 @@ router.post('/verify', async (req, res) => {
       reviewNotes: null,
       interviewQuestionSentAt: reviewStatus === 'INTERVIEW_REQUIRED' ? new Date() : null,
     });
+
+    try {
+      const oldMessages = await listDmMessagesForUser(record.userId, record.guildId, 50).catch(() => []);
+      for (const item of oldMessages) {
+        const channelId = item?.dmChannelId;
+        const messageId = item?.dmMessageId;
+        if (!channelId || !messageId) continue;
+        try {
+          const dmChannel = await client.channels.fetch(channelId).catch(() => null);
+          if (dmChannel?.messages) {
+            const msg = await dmChannel.messages.fetch(messageId).catch(() => null);
+            if (msg && msg.author?.id === client.user.id) {
+              await msg.delete().catch(() => {});
+            }
+          }
+        } catch (_) {
+          // ignore
+        }
+        await clearTokenDmFields(item.token).catch(() => {});
+      }
+    } catch (_) {
+      // ignore
+    }
 
     await sendVerificationLog({
       client,
