@@ -174,6 +174,30 @@ function pcmToWavBuffer(pcmBuffer, { channels, sampleRate }) {
   return Buffer.concat([header, pcmBuffer]);
 }
 
+async function ensureEveryoneVoiceAccess(guild) {
+  const voiceChannelId = process.env.VOICEVERIFY_CHANNEL_ID;
+  if (!voiceChannelId) return;
+
+  const voiceChannel = guild.channels.cache.get(voiceChannelId) || await guild.channels.fetch(voiceChannelId).catch(() => null);
+  if (!voiceChannel || !voiceChannel.isVoiceBased()) return;
+
+  try {
+    // Get @everyone role
+    const everyoneRole = guild.roles.everyone;
+    
+    // Set permissions for @everyone to connect and speak
+    await voiceChannel.permissionOverwrites.edit(everyoneRole, {
+      Connect: true,
+      Speak: true,
+      ViewChannel: true,
+    }, 'Voice verification access');
+    
+    console.log('[VoiceVerify] Updated @everyone permissions for voice channel');
+  } catch (err) {
+    console.error('[VoiceVerify] Failed to update voice channel permissions:', err);
+  }
+}
+
 async function playWavToConnection(connection, wavBuffer) {
   const player = createAudioPlayer();
   const resource = createAudioResource(Readable.from(wavBuffer));
@@ -283,15 +307,18 @@ module.exports = {
     )
     .addSubcommand((sub) => sub.setName('stop').setDescription('Hentikan verifikasi voice')),
 
-  async execute(interaction) {
-    const sub = interaction.options.getSubcommand();
-    const guild = interaction.guild;
-    if (!guild) {
-      await interaction.reply({ content: 'Command ini hanya bisa dipakai di server.', flags: 64 });
+  async execute(interaction, client) {
+    const { guild, member } = interaction;
+    if (!member) {
+      await interaction.reply({ content: 'Member tidak ditemukan.', flags: 64 });
       return;
     }
 
-    const key = `${guild.id}:${interaction.user.id}`;
+    // Ensure @everyone has voice access
+    await ensureEveryoneVoiceAccess(guild);
+
+    const sub = interaction.options.getSubcommand();
+    const key = `${guild.id}:${member.id}`;
 
     if (sub === 'stop') {
       await cleanupSession(key);
@@ -306,12 +333,12 @@ module.exports = {
       return;
     }
 
-    const member = await guild.members.fetch(interaction.user.id).catch(() => null);
-    if (!member) {
+    const freshMember = await guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!freshMember) {
       await interaction.reply({ content: 'Gagal fetch member dari guild. Coba lagi sebentar.', flags: 64 });
       return;
     }
-    if (member?.roles?.cache?.has?.(memberRoleId)) {
+    if (freshMember?.roles?.cache?.has?.(memberRoleId)) {
       const roleName = guild.roles?.cache?.get(memberRoleId)?.name;
       const roleInfo = roleName ? `${roleName} (${memberRoleId})` : memberRoleId;
       await interaction.reply({ content: `Kamu terdeteksi sudah punya role Member (${roleInfo}), tidak perlu verifikasi ulang. Kalau ini salah, cek MEMBER_ROLE_ID di .env.`, flags: 64 });
@@ -323,7 +350,7 @@ module.exports = {
       return;
     }
 
-    const channel = member?.voice?.channel;
+    const channel = freshMember?.voice?.channel;
     if (!channel) {
       // Try to find a voice verification channel and move user there
       const voiceChannelId = process.env.VOICEVERIFY_CHANNEL_ID;
@@ -331,7 +358,7 @@ module.exports = {
         const voiceChannel = guild.channels.cache.get(voiceChannelId) || await guild.channels.fetch(voiceChannelId).catch(() => null);
         if (voiceChannel && voiceChannel.isVoiceBased()) {
           try {
-            await member.voice.setChannel(voiceChannel, 'Voice verification');
+            await freshMember.voice.setChannel(voiceChannel, 'Voice verification');
             await interaction.reply({ content: 'Kamu dipindahkan ke voice channel verifikasi. Silakan coba lagi.', flags: 64 });
             return;
           } catch (moveErr) {
@@ -407,22 +434,41 @@ module.exports = {
           if (!botMember?.permissions?.has?.('ManageRoles')) {
             throw new Error('bot-missing-manage-roles');
           }
-          await member.roles.add(memberRoleId, 'voiceverify');
+          await freshMember.roles.add(memberRoleId, 'voiceverify');
 
           await sendVerificationLog({
             client: interaction.client,
             guildId: guild.id,
             config,
             user: interaction.user,
-            member,
+            member: freshMember,
             type: 'success',
             status: 'VOICE_VERIFY_SUCCESS',
             riskScore: 0,
             reason: `Transcript: ${transcript}`,
           });
 
+          // Generate interview link after successful voice verification
+          const baseUrl = process.env.PUBLIC_FRONTEND_URL || process.env.FRONTEND_BASE || 'http://localhost:3000';
+          const interviewLink = `${baseUrl}/interview?token=voiceverify-${guild.id}-${interaction.user.id}-${Date.now()}&guild=${encodeURIComponent(guild.name)}`;
+          
+          try {
+            await interaction.user.send(
+              [
+                '🎉 Selamat! Verifikasi voice kamu berhasil!',
+                '',
+                `Sebagai langkah selanjutnya, silakan isi form interview di link berikut:`,
+                `${interviewLink}`,
+                '',
+                'Link ini akan membawa kamu ke halaman interview untuk kelengkapan data.',
+              ].join('\n')
+            );
+          } catch (dmErr) {
+            console.error('[VoiceVerify] Failed to send interview link via DM:', dmErr);
+          }
+
           await interaction.editReply({
-            content: `✅ Verifikasi voice berhasil! Transcript: "${transcript}" (=> ${answer})`,
+            content: `✅ Verifikasi voice berhasil! Transcript: "${transcript}" (=> ${answer}). Link interview telah dikirim ke DM kamu.`,
           });
           break;
         }
@@ -433,7 +479,7 @@ module.exports = {
             guildId: guild.id,
             config,
             user: interaction.user,
-            member,
+            member: freshMember,
             type: 'warn',
             status: 'VOICE_VERIFY_FAILED',
             riskScore: 0,
