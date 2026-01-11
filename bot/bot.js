@@ -35,6 +35,7 @@ const {
   createTokenDocument,
   findLatestByUser,
   setTokenStatus,
+  findLatestByUserWithStatuses,
 } = require('../api/models/Tokens');
 const { getExtraRolesForUser } = require('../api/lib/roleSync');
 const { computeRiskScore } = require('../api/lib/riskScore');
@@ -448,6 +449,38 @@ async function handleMemberJoin(member) {
 }
 
 async function handleMessageCreate(message) {
+  if (!message.guild) {
+    if (message.author?.bot) return;
+    const content = String(message.content || '').trim();
+    if (!content) return;
+    try {
+      const tokenDoc = await findLatestByUserWithStatuses(message.author.id, GUILD_ID, ['INTERVIEW_REQUIRED']);
+      if (!tokenDoc?.token) return;
+      const answer = content.slice(0, 1800);
+      await setTokenStatus(tokenDoc.token, 'INTERVIEW_ANSWERED', {
+        interviewAnswer: answer,
+        interviewAnsweredAt: new Date(),
+      }).catch(() => {});
+
+      const config = await fetchConfig(GUILD_ID);
+      await sendVerificationLog({
+        client,
+        guildId: GUILD_ID,
+        config,
+        user: message.author,
+        member: null,
+        type: 'info',
+        status: 'INTERVIEW_ANSWERED',
+        riskScore: 0,
+        reason: `Token: ${tokenDoc.token}\nInterview answer: ${answer}`,
+      });
+
+      await message.reply('Terima kasih! Jawaban interview kamu sudah terkirim ke staf. Tunggu keputusan ya.');
+    } catch (_) {
+      null;
+    }
+    return;
+  }
   if (!message.guild || message.guild.id !== GUILD_ID) return;
   if (message.author.bot) return;
 
@@ -628,7 +661,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const isVerifyStart =
           interaction.commandName === 'verify' && !group && (!sub || sub === 'start');
 
-        if (!isVerifyStart) {
+        const isVoiceVerify =
+          interaction.commandName === 'voiceverify' && !group && (sub === 'start' || sub === 'stop');
+
+        if (!isVerifyStart && !isVoiceVerify) {
           await interaction.reply({
             content: 'Kamu belum punya role. Silakan jalankan `/verify start` dulu untuk verifikasi.',
             flags: 64,
