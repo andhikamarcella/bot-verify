@@ -13,7 +13,6 @@ const {
 } = require('@discordjs/voice');
 const prism = require('prism-media');
 const { SlashCommandBuilder } = require('discord.js');
-const { ensureMemberOrHigher } = require('../utils/permissions');
 const { fetchConfig } = require('../utils/guildConfig');
 const { sendVerificationLog } = require('../utils/logging');
 
@@ -257,12 +256,16 @@ module.exports = {
     }
 
     // start
-    try {
-      ensureMemberOrHigher(interaction);
+    const memberRoleId = process.env.MEMBER_ROLE_ID;
+    if (!memberRoleId) {
+      await interaction.reply({ content: 'MEMBER_ROLE_ID belum diset di environment bot.', flags: 64 });
+      return;
+    }
+
+    const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+    if (member?.roles?.cache?.has?.(memberRoleId)) {
       await interaction.reply({ content: 'Kamu sudah punya role Member, tidak perlu verifikasi ulang.', flags: 64 });
       return;
-    } catch (_) {
-      // user not member: proceed
     }
 
     if (sessions.has(key)) {
@@ -270,7 +273,6 @@ module.exports = {
       return;
     }
 
-    const member = await guild.members.fetch(interaction.user.id).catch(() => null);
     const channel = member?.voice?.channel;
     if (!channel) {
       await interaction.reply({ content: 'Kamu harus join voice channel dulu.', flags: 64 });
@@ -278,12 +280,6 @@ module.exports = {
     }
 
     const config = await fetchConfig(guild.id);
-
-    const memberRoleId = process.env.MEMBER_ROLE_ID;
-    if (!memberRoleId) {
-      await interaction.reply({ content: 'MEMBER_ROLE_ID belum diset di environment bot.', flags: 64 });
-      return;
-    }
 
     const code = randomDigits(Number(process.env.VOICEVERIFY_DIGITS) || 3);
     const maxAttempts = Math.max(1, Number(process.env.VOICEVERIFY_MAX_ATTEMPTS) || 3);
