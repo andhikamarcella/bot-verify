@@ -117,8 +117,8 @@ async function groqTranscribe(fileBuffer, filename) {
   if (!apiKey) throw new Error('missing-groq-api-key');
 
   const form = new FormData();
-  const blob = new Blob([fileBuffer], { type: 'audio/ogg' });
-  form.append('file', blob, filename || 'audio.ogg');
+  const blob = new Blob([fileBuffer], { type: 'audio/wav' });
+  form.append('file', blob, filename || 'audio.wav');
   form.append('model', DEFAULT_STT_MODEL);
   form.append('response_format', 'json');
   if (process.env.GROQ_STT_LANGUAGE) {
@@ -144,6 +144,32 @@ async function groqTranscribe(fileBuffer, filename) {
   return String(text);
 }
 
+function pcmToWavBuffer(pcmBuffer, { channels, sampleRate }) {
+  const ch = Number(channels) || 1;
+  const sr = Number(sampleRate) || 48000;
+  const bitsPerSample = 16;
+  const byteRate = (sr * ch * bitsPerSample) / 8;
+  const blockAlign = (ch * bitsPerSample) / 8;
+  const dataSize = pcmBuffer.length;
+  const header = Buffer.alloc(44);
+
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(ch, 22);
+  header.writeUInt32LE(sr, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(dataSize, 40);
+
+  return Buffer.concat([header, pcmBuffer]);
+}
+
 async function playWavToConnection(connection, wavBuffer) {
   const player = createAudioPlayer();
   const resource = createAudioResource(Readable.from(wavBuffer));
@@ -153,12 +179,16 @@ async function playWavToConnection(connection, wavBuffer) {
   await entersState(player, AudioPlayerStatus.Idle, 60_000);
 }
 
-async function recordUserToOgg(connection, userId, outPath) {
+async function recordUserToWav(connection, userId, outPath) {
   const receiver = connection.receiver;
   if (!receiver) throw new Error('receiver-not-available');
 
   const silenceMs = Math.max(500, Number(process.env.VOICEVERIFY_SILENCE_MS) || 1200);
   const maxDurationMs = Math.max(3_000, Number(process.env.VOICEVERIFY_MAX_RECORD_MS) || 10_000);
+
+  const channels = 2;
+  const sampleRate = 48000;
+  const frameSize = 960;
 
   const opusStream = receiver.subscribe(userId, {
     end: {
@@ -167,15 +197,9 @@ async function recordUserToOgg(connection, userId, outPath) {
     },
   });
 
-  const oggStream = new prism.opus.OggLogicalBitstream({
-    opusHead: new prism.opus.OpusHead({ channelCount: 2, sampleRate: 48000 }),
-    pageSizeControl: {
-      maxPackets: 10,
-    },
-  });
-
-  const writeStream = fs.createWriteStream(outPath);
-  opusStream.pipe(oggStream).pipe(writeStream);
+  const decoder = new prism.opus.Decoder({ rate: sampleRate, channels, frameSize });
+  const pcmChunks = [];
+  decoder.on('data', (chunk) => pcmChunks.push(chunk));
 
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -186,11 +210,11 @@ async function recordUserToOgg(connection, userId, outPath) {
       }
     }, maxDurationMs);
 
-    writeStream.once('finish', () => {
+    decoder.once('end', () => {
       clearTimeout(timer);
       resolve();
     });
-    writeStream.once('error', (err) => {
+    decoder.once('error', (err) => {
       clearTimeout(timer);
       reject(err);
     });
@@ -198,11 +222,13 @@ async function recordUserToOgg(connection, userId, outPath) {
       clearTimeout(timer);
       reject(err);
     });
-    oggStream.once('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
+
+    opusStream.pipe(decoder);
   });
+
+  const pcm = Buffer.concat(pcmChunks);
+  const wav = pcmToWavBuffer(pcm, { channels, sampleRate });
+  await fs.promises.writeFile(outPath, wav);
 }
 
 async function cleanupSession(key) {
@@ -290,7 +316,7 @@ module.exports = {
     const code = randomDigits(Number(process.env.VOICEVERIFY_DIGITS) || 3);
     const maxAttempts = Math.max(1, Number(process.env.VOICEVERIFY_MAX_ATTEMPTS) || 3);
 
-    const tmpPath = path.join(os.tmpdir(), `voiceverify-${guild.id}-${interaction.user.id}-${Date.now()}.ogg`);
+    const tmpPath = path.join(os.tmpdir(), `voiceverify-${guild.id}-${interaction.user.id}-${Date.now()}.wav`);
 
     const connection = joinVoiceChannel({
       channelId: channel.id,
@@ -329,7 +355,7 @@ module.exports = {
         if (!session) throw new Error('session-ended');
         session.attempts += 1;
 
-        await recordUserToOgg(connection, interaction.user.id, tmpPath);
+        await recordUserToWav(connection, interaction.user.id, tmpPath);
         const oggBuf = await fs.promises.readFile(tmpPath);
         const transcript = await groqTranscribe(oggBuf, path.basename(tmpPath));
         const answer = normalizeAnswer(transcript);
