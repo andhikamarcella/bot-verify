@@ -120,25 +120,38 @@ export default function InterviewPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 flex items-center justify-center p-4">
-        <div className="text-white text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
-          <p>Memuat status interview...</p>
+      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
+        <div className="animate-pulse flex flex-col items-center gap-4">
+          <div className="h-12 w-12 bg-slate-800 rounded-full"></div>
+          <div className="h-4 w-32 bg-slate-800 rounded"></div>
+          <div className="text-slate-400 text-sm">Memuat status interview...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!token || status.includes('Token tidak ditemukan') || status.includes('Token tidak valid')) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-900 border border-red-500/30 p-8 rounded-2xl text-center shadow-2xl">
+          <ExclamationTriangleIcon className="h-16 w-16 text-red-500 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold mb-2">Akses Ditolak</h1>
+          <p className="text-slate-400 mb-6">{status || 'Token tidak ditemukan'}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 flex items-center justify-center p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
       <div className="max-w-md w-full">
-        <div className="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl p-8 border border-white/20">
+        <div className="bg-slate-900 border border-slate-700/30 p-8 rounded-2xl shadow-2xl">
           {/* Header */}
           <div className="text-center mb-8">
             {guildIcon ? (
               <img src={guildIcon} alt={guildName} className="w-16 h-16 rounded-full mx-auto mb-4 border-2 border-white/30" />
             ) : (
-              <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full mx-auto mb-4 flex items-center justify-center">
+              <div className="w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-500 rounded-full mx-auto mb-4 flex items-center justify-center">
                 <span className="text-white text-2xl font-bold">{guildName.charAt(0)}</span>
               </div>
             )}
