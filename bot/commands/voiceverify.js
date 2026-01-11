@@ -263,8 +263,14 @@ module.exports = {
     }
 
     const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member) {
+      await interaction.reply({ content: 'Gagal fetch member dari guild. Coba lagi sebentar.', flags: 64 });
+      return;
+    }
     if (member?.roles?.cache?.has?.(memberRoleId)) {
-      await interaction.reply({ content: 'Kamu sudah punya role Member, tidak perlu verifikasi ulang.', flags: 64 });
+      const roleName = guild.roles?.cache?.get(memberRoleId)?.name;
+      const roleInfo = roleName ? `${roleName} (${memberRoleId})` : memberRoleId;
+      await interaction.reply({ content: `Kamu terdeteksi sudah punya role Member (${roleInfo}), tidak perlu verifikasi ulang. Kalau ini salah, cek MEMBER_ROLE_ID di .env.`, flags: 64 });
       return;
     }
 
