@@ -87,7 +87,7 @@ function normalizeAnswer(raw) {
 }
 
 async function groqTtsWav(text, lang) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
   if (!apiKey) throw new Error('missing-groq-api-key');
 
   const normalized = normalizeTtsText(text, lang);
@@ -116,7 +116,7 @@ async function groqTtsWav(text, lang) {
 }
 
 async function groqTranscribe(fileBuffer, filename, language) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
   if (!apiKey) throw new Error('missing-groq-api-key');
 
   const form = new FormData();
