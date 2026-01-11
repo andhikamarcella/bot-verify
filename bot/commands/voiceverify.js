@@ -481,9 +481,28 @@ module.exports = {
 
           // Generate interview link after successful voice verification
           const baseUrl = process.env.PUBLIC_FRONTEND_URL || process.env.FRONTEND_BASE || 'http://localhost:3000';
-          const interviewLink = `${baseUrl}/interview?token=voiceverify-${guild.id}-${interaction.user.id}-${Date.now()}&guild=${encodeURIComponent(guild.name)}`;
+          
+          // Create a proper verification token for interview
+          const { createTokenDocument } = require('../models/Tokens');
+          const crypto = require('crypto');
+          const interviewToken = crypto.randomBytes(32).toString('hex');
           
           try {
+            await createTokenDocument({
+              token: interviewToken,
+              userId: interaction.user.id,
+              guildId: guild.id,
+              roleId: memberRoleId,
+              status: 'INTERVIEW_REQUIRED',
+              interviewLink: `${baseUrl}/interview?token=${interviewToken}&guild=${encodeURIComponent(guild.name)}`,
+              reviewedBy: interaction.user.id,
+              reviewedAt: new Date(),
+              reviewDecision: 'INTERVIEW',
+              reviewNotes: 'Voice verification passed, interview required',
+            });
+            
+            const interviewLink = `${baseUrl}/interview?token=${interviewToken}&guild=${encodeURIComponent(guild.name)}`;
+            
             await interaction.user.send(
               [
                 '🎉 Selamat! Verifikasi voice kamu berhasil!',
@@ -495,7 +514,7 @@ module.exports = {
               ].join('\n')
             );
           } catch (dmErr) {
-            console.error('[VoiceVerify] Failed to send interview link via DM:', dmErr);
+            console.error('[VoiceVerify] Failed to create interview token or send DM:', dmErr);
           }
 
           await interaction.editReply({
