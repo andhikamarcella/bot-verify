@@ -332,21 +332,14 @@ async function enforceBlacklistOnMember({ guild, member, reason }) {
   }
 }
 
-// Inline callGroqChat function to avoid module loading issues
+// Completely self-contained callGroqChat function
 async function inlineCallGroqChat(prompt, language = 'id', systemPrompt = null) {
   try {
-    // Try to import callGroq from ai module
-    const aiModule = require('./commands/ai');
-    const callGroq = aiModule.callGroq;
-    
-    if (!callGroq || typeof callGroq !== 'function') {
-      throw new Error('callGroq function not available');
-    }
-    
     const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
     if (!apiKey) throw new Error('missing-groq-api-key');
 
     const model = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+    const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
     
     // Build messages array
     const messages = [];
@@ -365,8 +358,27 @@ async function inlineCallGroqChat(prompt, language = 'id', systemPrompt = null) 
     // Add user prompt
     messages.push({ role: 'user', content: String(prompt) });
 
-    const response = await callGroq({ apiKey, model, messages });
-    return response?.content || 'Maaf, aku tidak bisa menjawab saat ini.';
+    // Direct API call
+    const response = await fetch(GROQ_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: String(model),
+        temperature: 0.7,
+        max_tokens: 512,
+        messages,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Groq API error: ${response.status} ${response.statusText}`);
+    }
+
+    const json = await response.json();
+    return json?.choices?.[0]?.message?.content || 'Maaf, aku tidak bisa menjawab saat ini.';
     
   } catch (error) {
     console.error('[Inline CallGroqChat] Error:', error);
