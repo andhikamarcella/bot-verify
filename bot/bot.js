@@ -334,31 +334,44 @@ async function enforceBlacklistOnMember({ guild, member, reason }) {
 
 // Inline callGroqChat function to avoid module loading issues
 async function inlineCallGroqChat(prompt, language = 'id', systemPrompt = null) {
-  const { callGroq } = require('./commands/ai');
-  const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
-  if (!apiKey) throw new Error('missing-groq-api-key');
+  try {
+    // Try to import callGroq from ai module
+    const aiModule = require('./commands/ai');
+    const callGroq = aiModule.callGroq;
+    
+    if (!callGroq || typeof callGroq !== 'function') {
+      throw new Error('callGroq function not available');
+    }
+    
+    const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
+    if (!apiKey) throw new Error('missing-groq-api-key');
 
-  const model = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
-  
-  // Build messages array
-  const messages = [];
-  
-  // Add system prompt if provided
-  if (systemPrompt) {
-    messages.push({ role: 'system', content: systemPrompt });
-  } else {
-    // Default system prompt
-    const defaultSystem = language === 'en' 
-      ? 'You are a helpful AI assistant. Be friendly and concise.'
-      : 'Kamu adalah asisten AI yang helpful. Jawab dengan ramah dan singkat.';
-    messages.push({ role: 'system', content: defaultSystem });
+    const model = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+    
+    // Build messages array
+    const messages = [];
+    
+    // Add system prompt if provided
+    if (systemPrompt) {
+      messages.push({ role: 'system', content: systemPrompt });
+    } else {
+      // Default system prompt
+      const defaultSystem = language === 'en' 
+        ? 'You are a helpful AI assistant. Be friendly and concise.'
+        : 'Kamu adalah asisten AI yang helpful. Jawab dengan ramah dan singkat.';
+      messages.push({ role: 'system', content: defaultSystem });
+    }
+    
+    // Add user prompt
+    messages.push({ role: 'user', content: String(prompt) });
+
+    const response = await callGroq({ apiKey, model, messages });
+    return response?.content || 'Maaf, aku tidak bisa menjawab saat ini.';
+    
+  } catch (error) {
+    console.error('[Inline CallGroqChat] Error:', error);
+    return 'Maaf, terjadi kesalahan dengan AI. Coba lagi nanti ya.';
   }
-  
-  // Add user prompt
-  messages.push({ role: 'user', content: String(prompt) });
-
-  const response = await callGroq({ apiKey, model, messages });
-  return response?.content || 'Maaf, aku tidak bisa menjawab saat ini.';
 }
 
 async function handleDMChatAI(message) {
