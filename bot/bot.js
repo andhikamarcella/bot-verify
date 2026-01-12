@@ -294,6 +294,264 @@ async function enforceBlacklistOnMember({ guild, member, reason }) {
   }
 }
 
+async function handleDMChatAI(message) {
+  try {
+    // Typing indicator
+    await message.channel.sendTyping();
+
+    // Check if this is first interaction or introduction request
+    const content = message.content.toLowerCase();
+    const isIntroRequest = content.includes('siapa kamu') || content.includes('hai') || content.includes('hello') || content.includes('intro') || content.includes('kenalan');
+    
+    // Get user's shared servers
+    const sharedGuilds = message.client.guilds.cache.filter(guild => guild.members.cache.has(message.author.id));
+    const guildList = sharedGuilds.map(guild => `**${guild.name}**`).join(', ') || 'tidak ada server bersama';
+
+    // Build system prompt with bot info and features
+    let systemPrompt = `Kamu adalah asisten AI Discord yang cerdas dan ramah. Nama kamu "Verify Portal Bot".
+
+**Info Bot:**
+- Tujuan utama: Verifikasi member dan management server Discord
+- Bisa ngobrol, voice call, bantu verifikasi
+- Terhubung di server: ${guildList}
+
+**Fitur-fitur yang tersedia:**
+🔐 **Verifikasi**: /verify start - Mulai proses verifikasi
+🎙️ **Voice Verify**: /voiceverify start - Verifikasi dengan suara
+🤖 **AI Chat**: /ai [pesan] - Ngobrol dengan AI
+📢 **Say**: /say [pesan] - Bot bicara di voice channel
+💬 **Voice Chat**: /voicechat - Ngobrol suara dengan AI
+📋 **Application**: /app list, /app interview - Management aplikasi
+🛡️ **Moderation**: /kick, /ban, /timeout - Tools moderator
+🎵 **Music**: Basic voice commands
+
+**Cara pakai di DM:**
+- Ketik pesan apa saja untuk ngobrol dengan AI
+- Start voice call dengan bot untuk ngobrol suara
+- Bot akan auto-detect dan join voice call
+
+**Saran fitur:**
+- "Bisakah bantu verifikasi?" → Guide ke /verify
+- "Mau voice call" → Guide ke voice call
+- "Butuh bantuan moderator" → List command moderator
+- "Info server" → Berikan info server yang bersama
+- "Fitur lain?" → Jelaskan semua fitur bot
+
+Jika user minta bantuan atau tanya fitur, berikan panduan yang jelas. Selalu ramah dan helpful.`;
+
+    // Add intro for first-time users
+    if (isIntroRequest) {
+      const introMessage = `👋 Halo! Aku **Verify Portal Bot** - asisten AI Discord yang membantu verifikasi dan management server.
+
+**Server kita yang bersama:** ${guildList}
+
+**Yang bisa aku lakuin:**
+- 🔐 Bantu verifikasi member baru
+- 🎙️ Voice verification dengan suara  
+- 🤖 Ngobrol chat atau voice call
+- 📢 Management server dan moderator
+- 🎵 Main di voice channel
+
+**Mau mulai dari mana?**
+- Ketik apa saja untuk ngobrol sama aku
+- Start voice call untuk ngobrol suara
+- Ketik "bantuan" untuk lihat semua command
+
+Aku siap bantu! 😊`;
+      
+      await message.reply({
+        content: introMessage,
+        allowedMentions: { repliedUser: false }
+      });
+      return;
+    }
+
+    // Get AI response with system prompt
+    const { callGroqChat } = require('./commands/ai');
+    const aiResponse = await callGroqChat(message.content, 'id', systemPrompt);
+
+    // Send AI response
+    await message.reply({
+      content: aiResponse.slice(0, 2000), // Discord limit
+      allowedMentions: { repliedUser: false }
+    });
+
+  } catch (error) {
+    console.error('[DM AI] Error:', error);
+    await message.reply({
+      content: 'Maaf, terjadi kesalahan. Coba lagi nanti ya.',
+      allowedMentions: { repliedUser: false }
+    });
+  }
+}
+
+async function handleDMVoiceCallAI(message) {
+  try {
+    const voiceChannel = message.member.voice.channel;
+    
+    // Get user's shared servers for context
+    const sharedGuilds = message.client.guilds.cache.filter(guild => guild.members.cache.has(message.author.id));
+    const guildList = sharedGuilds.map(guild => guild.name).join(', ') || 'tidak ada server bersama';
+    
+    // Join the voice channel
+    const { joinVoiceChannel, createAudioPlayer, createAudioResource, VoiceConnectionStatus, entersState, AudioPlayerStatus } = require('@discordjs/voice');
+    const { groqTtsWav, groqTranscribe } = require('./commands/voiceverify');
+    
+    const connection = joinVoiceChannel({
+      channelId: voiceChannel.id,
+      guildId: voiceChannel.guild.id,
+      adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+      selfDeaf: false,
+      selfMute: false,
+    });
+
+    const welcomeMessage = `🎙️ Aku join voice call! Kita di server **${voiceChannel.guild.name}**. 
+
+Aku siap ngobrol suara sama kamu! 🎤
+
+**Tips ngobrol:**
+- Bicara jelas setelah aku selesai bicara
+- Bisa tanya apa aja tentang server atau fitur bot
+- Aku auto-leave setelah 5 menit kalau nggak ada aktivitas
+
+Silakan mulai bicara ya! 😊`;
+
+    await message.reply({
+      content: welcomeMessage,
+      allowedMentions: { repliedUser: false }
+    });
+
+    // Wait for connection to be ready
+    await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+
+    // Start listening loop with server context
+    await startVoiceChatLoop(connection, message, voiceChannel.guild.name, guildList);
+
+  } catch (error) {
+    console.error('[Voice Call AI] Error:', error);
+    await message.reply({
+      content: 'Maaf, gabisa join voice call. Pastikan aku punya permission Connect dan Speak di server ini.',
+      allowedMentions: { repliedUser: false }
+    });
+  }
+}
+
+async function startVoiceChatLoop(connection, originalMessage, serverName, guildList) {
+  const { createAudioPlayer, createAudioResource, AudioPlayerStatus, entersState } = require('@discordjs/voice');
+  const { groqTtsWav, groqTranscribe } = require('./commands/voiceverify');
+  const { callGroqChat } = require('./commands/ai');
+  const { recordUserToWav } = require('./commands/voiceverify');
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const { VoiceConnectionStatus } = require('@discordjs/voice');
+
+  const player = createAudioPlayer();
+  connection.subscribe(player);
+
+  let isListening = false;
+  const tmpDir = os.tmpdir();
+
+  // Enhanced system prompt for voice chat
+  const voiceSystemPrompt = `Kamu adalah asisten AI Discord yang sedang voice call di server "${serverName}". 
+
+Server bersama user: ${guildList}
+
+**Konteks voice call:**
+- User sedang voice call langsung dengan kamu
+- Respon harus lebih singkat dan natural (cocok untuk suara)
+- Bisa bantu tentang verifikasi, fitur bot, atau ngobrol casual
+- Sedia bantu jika user tanya command atau fitur
+
+**Style bicara:**
+- Ramah dan casual seperti teman ngobrol
+- Jawaban singkat dan jelas
+- Bisa kasih saran fitur bot yang relevan
+- Jika user bingging, guide ke command yang tepat
+
+Contoh respons:
+- "Mau verifikasi? Coba /verify start ya"
+- "Butuh bantuan? Ketik /help di server"
+- "Aku juga bisa voice verify lho, coba /voiceverify"`;
+
+  // Welcome message
+  try {
+    const welcomeWav = await groqTtsWav(`Halo! Selamat datang di voice call server ${serverName}. Aku siap bantu kamu!`, 'id');
+    const welcomeResource = createAudioResource(welcomeWav);
+    player.play(welcomeResource);
+    await entersState(player, AudioPlayerStatus.Idle, 60_000);
+  } catch (err) {
+    console.error('[Voice Chat] Failed to play welcome:', err);
+  }
+
+  // Start continuous listening
+  const listenInterval = setInterval(async () => {
+    if (isListening) return;
+    isListening = true;
+
+    try {
+      // Record user speech
+      const tmpPath = path.join(tmpDir, `voice-ai-${Date.now()}.wav`);
+      await recordUserToWav(connection, originalMessage.author.id, tmpPath);
+
+      // Transcribe
+      const wavBuffer = await fs.promises.readFile(tmpPath);
+      const transcript = await groqTranscribe(wavBuffer, 'voice-ai.wav', 'id');
+
+      if (transcript && transcript.trim().length > 0) {
+        console.log(`[Voice Chat] User: ${transcript}`);
+
+        // Get AI response with voice context
+        const aiResponse = await callGroqChat(transcript, 'id', voiceSystemPrompt);
+        console.log(`[Voice Chat] AI: ${aiResponse}`);
+
+        // Speak AI response
+        try {
+          const responseWav = await groqTtsWav(aiResponse.slice(0, 300), 'id'); // Limit TTS length
+          const responseResource = createAudioResource(responseWav);
+          player.play(responseResource);
+          await entersState(player, AudioPlayerStatus.Idle, 60_000);
+        } catch (ttsErr) {
+          console.error('[Voice Chat] TTS error:', ttsErr);
+          // Fallback: send text message
+          await originalMessage.channel.send(`🤖: ${aiResponse.slice(0, 500)}`);
+        }
+      }
+
+      // Cleanup
+      try {
+        if (fs.existsSync(tmpPath)) {
+          fs.unlinkSync(tmpPath);
+        }
+      } catch (cleanupErr) {
+        console.error('[Voice Chat] Cleanup error:', cleanupErr);
+      }
+
+    } catch (error) {
+      console.error('[Voice Chat] Loop error:', error);
+    } finally {
+      isListening = false;
+    }
+  }, 3000); // Listen every 3 seconds
+
+  // Cleanup on disconnect
+  connection.on(VoiceConnectionStatus.Disconnected, () => {
+    clearInterval(listenInterval);
+    connection.destroy();
+  });
+
+  // Auto-disconnect after 5 minutes of inactivity
+  let lastActivity = Date.now();
+  const activityCheck = setInterval(() => {
+    if (Date.now() - lastActivity > 5 * 60 * 1000) {
+      clearInterval(listenInterval);
+      clearInterval(activityCheck);
+      connection.destroy();
+      originalMessage.channel.send(`👋 Terima kasih sudah voice call di **${serverName}**! Aku leave ya. Sampai jumpa lagi! 😊`);
+    }
+  }, 30 * 1000);
+}
+
 async function scheduleReminder(member) {
   const config = await fetchConfig(member.guild.id);
   const reminderEnabled =
@@ -488,32 +746,48 @@ async function handleMessageCreate(message) {
     if (message.author?.bot) return;
     const content = String(message.content || '').trim();
     if (!content) return;
+
+    // Check if user is in voice call (DM voice call)
+    const voiceState = message.member?.voice;
+    const isInVoiceCall = voiceState?.channel && !voiceState.channel.isVoiceBased();
+
+    if (isInVoiceCall) {
+      await handleDMVoiceCallAI(message);
+      return;
+    }
+
+    // Check for interview answers first
     try {
       const tokenDoc = await findLatestByUserWithStatuses(message.author.id, GUILD_ID, ['INTERVIEW_REQUIRED']);
-      if (!tokenDoc?.token) return;
-      const answer = content.slice(0, 1800);
-      await setTokenStatus(tokenDoc.token, 'INTERVIEW_ANSWERED', {
-        interviewAnswer: answer,
-        interviewAnsweredAt: new Date(),
-      }).catch(() => {});
+      if (tokenDoc?.token) {
+        const answer = content.slice(0, 1800);
+        await setTokenStatus(tokenDoc.token, 'INTERVIEW_ANSWERED', {
+          interviewAnswer: answer,
+          interviewAnsweredAt: new Date(),
+        }).catch(() => {});
 
-      const config = await fetchConfig(GUILD_ID);
-      await sendVerificationLog({
-        client,
-        guildId: GUILD_ID,
-        config,
-        user: message.author,
-        member: null,
-        type: 'info',
-        status: 'INTERVIEW_ANSWERED',
-        riskScore: 0,
-        reason: `Token: ${tokenDoc.token}\nInterview answer: ${answer}`,
-      });
+        const config = await fetchConfig(GUILD_ID);
+        await sendVerificationLog({
+          client,
+          guildId: GUILD_ID,
+          config,
+          user: message.author,
+          member: null,
+          type: 'info',
+          status: 'INTERVIEW_ANSWERED',
+          riskScore: 0,
+          reason: `Token: ${tokenDoc.token}\nInterview answer: ${answer}`,
+        });
 
-      await message.reply('Terima kasih! Jawaban interview kamu sudah terkirim ke staf. Tunggu keputusan ya.');
+        await message.reply('Terima kasih! Jawaban interview kamu sudah terkirim ke staf. Tunggu keputusan ya.');
+        return;
+      }
     } catch (_) {
       null;
     }
+
+    // Handle DM AI chat
+    await handleDMChatAI(message);
     return;
   }
   if (!message.guild || message.guild.id !== GUILD_ID) return;
