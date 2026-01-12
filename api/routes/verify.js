@@ -628,42 +628,67 @@ router.get('/interview-status', async (req, res) => {
   }
 
   try {
-    await connectMongo();
-    console.log('[API] Connected to MongoDB, finding token...');
-    
-    const record = await findToken(token);
-    console.log('[API] Token record found:', !!record);
-    
-    if (!record) {
-      console.log('[API] Token not found in database');
-      return res.status(400).json({ ok: false, error: 'invalid-token' });
+    // Find token
+    const tokenDoc = await findToken(token);
+    if (!tokenDoc) {
+      console.log('[API] Token not found:', token);
+      return res.status(404).json({ ok: false, error: 'Token tidak ditemukan' });
     }
-
-    console.log('[API] Token record data:', {
-      status: record.status,
-      userId: record.userId,
-      guildId: record.guildId,
-      interviewLink: !!record.interviewLink
+    
+    // Get guild info for icon
+    const guild = client.guilds.cache.get(tokenDoc.guildId);
+    let guildIcon = null;
+    if (guild) {
+      guildIcon = guild.iconURL({ size: 128, format: 'png', dynamic: true });
+    }
+    
+    // Check if requester is staff (simplified - you might want to implement proper staff checking)
+    const isStaff = false; // This would be based on user authentication/roles
+    
+    console.log('[API] Found token:', { 
+      status: tokenDoc.status, 
+      hasAnswers: !!tokenDoc.interviewAnswer,
+      guildName: guild?.name,
+      isStaff 
     });
-
+    
     const response = {
       ok: true,
-      status: record.status,
-      interviewLink: record.interviewLink || null,
-      interviewSubmittedAt: record.interviewSubmittedAt || null,
-      reviewStatus: record.reviewStatus || null,
-      reason: record.reason || null,
+      status: tokenDoc.status,
+      interviewSubmittedAt: tokenDoc.interviewAnsweredAt,
+      reviewStatus: tokenDoc.reviewStatus,
+      reason: tokenDoc.reviewNotes,
+      guildName: guild?.name || 'Unknown Server',
+      guildIcon,
+      userId: tokenDoc.userId,
+      guildId: tokenDoc.guildId,
+      isStaff,
+      // Include answers if status is answered or pending review
+      answers: (tokenDoc.status === 'INTERVIEW_ANSWERED' || tokenDoc.status === 'PENDING_REVIEW') ? {
+        name: tokenDoc.interviewAnswer?.name || '',
+        age: tokenDoc.interviewAnswer?.age || '',
+        reason: tokenDoc.interviewAnswer?.reason || '',
+        experience: tokenDoc.interviewAnswer?.experience || '',
+        availability: tokenDoc.interviewAnswer?.availability || '',
+        expectations: tokenDoc.interviewAnswer?.expectations || ''
+      } : null
     };
-
-    console.log('[API] Sending response:', response);
+    
+    console.log('[API] Sending response:', { 
+      status: response.status,
+      hasAnswers: !!response.answers,
+      guildName: response.guildName
+    });
+    
     res.json(response);
-  } catch (err) {
-    console.error('[API] Interview status error:', err);
-    res.status(500).json({ ok: false, error: 'internal-error' });
+    
+  } catch (error) {
+    console.error('[API] Interview status error:', error);
+    res.status(500).json({ ok: false, error: 'internal-server-error' });
   }
 });
 
-// POST /api/interview-submit (bot calls this when user submits interview via DM)
+// POST /api/interview-submit
 router.post('/interview-submit', async (req, res) => {
   const { token, answers } = req.body || {};
   if (!token) {
@@ -679,8 +704,8 @@ router.post('/interview-submit', async (req, res) => {
 
     // Update token with interview answers
     await setTokenStatus(token, 'INTERVIEW_ANSWERED', {
-      interviewAnswers: answers,
-      interviewSubmittedAt: new Date().toISOString(),
+      interviewAnswer: answers,
+      interviewAnsweredAt: new Date(),
     });
 
     // Log interview submission
@@ -690,16 +715,191 @@ router.post('/interview-submit', async (req, res) => {
       config: await getGuildConfig(record.guildId),
       user: { id: record.userId, tag: `User ${record.userId}` },
       member: null,
-      type: 'INTERVIEW_SUBMITTED',
+      type: 'info',
       status: 'INTERVIEW_ANSWERED',
       riskScore: 0,
-      reason: `Interview submitted via DM`,
+      reason: `Interview submitted via web form`,
     });
 
     res.json({ ok: true });
   } catch (err) {
     console.error('[API] Interview submit error:', err);
     res.status(500).json({ ok: false, error: 'internal-error' });
+  }
+});
+
+// Interview Action Endpoint (Approve/Reject/Hold)
+router.post('/interview-action', async (req, res) => {
+  try {
+    const { token, action } = req.body;
+    
+    console.log('[Interview Action] Received request:', { token, action });
+    
+    if (!token || !action) {
+      return res.status(400).json({ error: 'Token dan action diperlukan' });
+    }
+    
+    if (!['approve', 'reject', 'hold'].includes(action)) {
+      return res.status(400).json({ error: 'Action tidak valid' });
+    }
+    
+    // Find token
+    const tokenDoc = await findToken(token);
+    if (!tokenDoc) {
+      return res.status(404).json({ error: 'Token tidak ditemukan' });
+    }
+    
+    // Get guild and user info
+    const guild = client.guilds.cache.get(tokenDoc.guildId);
+    if (!guild) {
+      return res.status(404).json({ error: 'Guild tidak ditemukan' });
+    }
+    
+    const member = await guild.members.fetch(tokenDoc.userId).catch(() => null);
+    if (!member) {
+      return res.status(404).json({ error: 'User tidak ada di server' });
+    }
+    
+    const config = await fetchConfig(guild.id);
+    
+    let newStatus;
+    let message;
+    
+    switch (action) {
+      case 'approve':
+        // Assign role
+        if (tokenDoc.roleId && member.roles.cache.has(tokenDoc.roleId) === false) {
+          await member.roles.add(tokenDoc.roleId);
+          console.log(`[Interview Action] Assigned role ${tokenDoc.roleId} to user ${member.user.tag}`);
+        }
+        
+        newStatus = 'VERIFIED';
+        message = '✅ Aplikasi disetujui! User mendapatkan role dan dapat join Discord.';
+        
+        // Send verification log
+        await sendVerificationLog({
+          client,
+          guildId: guild.id,
+          config,
+          user: member.user,
+          member,
+          type: 'success',
+          status: 'VERIFIED',
+          riskScore: 0,
+          reason: `Interview approved by staff. Token: ${token}`,
+        });
+        
+        // Send DM to user
+        try {
+          await member.user.send(`
+🎉 **Selamat! Interview Kamu Disetujui!**
+
+Terima kasih telah menunggu review dari staff. Kamu telah disetujui dan mendapatkan role di server **${guild.name}**.
+
+🔗 **Join Discord Server:** https://discord.gg/gECYdzVz2j
+
+Jika ada kendala, hubungi staff server ya!
+          `).catch(() => {});
+        } catch (dmError) {
+          console.log('[Interview Action] Failed to send DM to user:', dmError.message);
+        }
+        break;
+        
+      case 'reject':
+        // Kick from server
+        await member.kick('Interview ditolak oleh staff');
+        console.log(`[Interview Action] Kicked user ${member.user.tag} from server`);
+        
+        newStatus = 'REJECTED';
+        message = '❌ Aplikasi ditolak. User telah dikeluarkan dari server.';
+        
+        // Send verification log
+        await sendVerificationLog({
+          client,
+          guildId: guild.id,
+          config,
+          user: member.user,
+          member: null,
+          type: 'fail',
+          status: 'REJECTED',
+          riskScore: 100,
+          reason: `Interview rejected by staff. Token: ${token}`,
+        });
+        
+        // Send DM to user (if possible, before kick)
+        try {
+          await member.user.send(`
+❌ **Maaf, Interview Kamu Ditolak**
+
+Setelah review oleh staff, aplikasi kamu tidak disetujui untuk bergabung dengan server **${guild.name}**.
+
+Kamu telah dikeluarkan dari server. Jika kamu merasa ini kesalahan, silakan hubungi staff server.
+
+Terima kasih atas minat kamu.
+          `).catch(() => {});
+        } catch (dmError) {
+          console.log('[Interview Action] Failed to send DM to user:', dmError.message);
+        }
+        break;
+        
+      case 'hold':
+        newStatus = 'HOLD';
+        message = '⏸️ Aplikasi ditahan. User diminta mengisi ulang form.';
+        
+        // Send verification log
+        await sendVerificationLog({
+          client,
+          guildId: guild.id,
+          config,
+          user: member.user,
+          member,
+          type: 'info',
+          status: 'HOLD',
+          riskScore: 50,
+          reason: `Interview held by staff. User requested to re-fill form. Token: ${token}`,
+        });
+        
+        // Send DM to user
+        try {
+          await member.user.send(`
+⏸️ **Aplikasi Kamu Ditahan**
+
+Staff meminta kamu untuk mengisi ulang form interview. Silakan perbarui jawaban kamu di link interview yang sama.
+
+🔗 **Link Interview:** ${process.env.PUBLIC_FRONTEND_URL || 'http://localhost:3000'}/interview?token=${token}&guild=${encodeURIComponent(guild.name)}
+
+Pastikan jawaban kamu lengkap dan jelas ya!
+          `).catch(() => {});
+        } catch (dmError) {
+          console.log('[Interview Action] Failed to send DM to user:', dmError.message);
+        }
+        break;
+    }
+    
+    // Update token status
+    await setTokenStatus(token, newStatus, {
+      reviewedAt: new Date(),
+      reviewDecision: action.toUpperCase(),
+      reviewNotes: `Action performed by staff via web interface`,
+    });
+    
+    console.log(`[Interview Action] Successfully performed ${action} for token ${token}`);
+    
+    res.json({ 
+      success: true, 
+      message,
+      action,
+      newStatus,
+      userId: tokenDoc.userId,
+      guildId: tokenDoc.guildId
+    });
+    
+  } catch (error) {
+    console.error('[Interview Action] Error:', error);
+    res.status(500).json({ 
+      error: 'Terjadi kesalahan saat melakukan action',
+      details: error.message 
+    });
   }
 });
 
