@@ -405,7 +405,10 @@ Aku siap bantu! 😊`;
     }
 
     // Get AI response with system prompt
-    const { callGroqChat } = require('./commands/ai');
+    const callGroqChat = require('./commands/ai').callGroqChat;
+    if (!callGroqChat || typeof callGroqChat !== 'function') {
+      throw new Error('callGroqChat function not available');
+    }
     const aiResponse = await callGroqChat(message.content, 'id', systemPrompt);
 
     // Send AI response
@@ -477,7 +480,7 @@ Silakan mulai bicara ya! 😊`;
 async function startVoiceChatLoop(connection, originalMessage, serverName, guildList) {
   const { createAudioPlayer, createAudioResource, AudioPlayerStatus, entersState } = require('@discordjs/voice');
   const { groqTtsWav, groqTranscribe } = require('./commands/voiceverify');
-  const { callGroqChat } = require('./commands/ai');
+  const callGroqChat = require('./commands/ai').callGroqChat;
   const { recordUserToWav } = require('./commands/voiceverify');
   const fs = require('fs');
   const path = require('path');
@@ -540,6 +543,9 @@ Contoh respons:
         console.log(`[Voice Chat] User: ${transcript}`);
 
         // Get AI response with voice context
+        if (!callGroqChat || typeof callGroqChat !== 'function') {
+          throw new Error('callGroqChat function not available in voice chat');
+        }
         const aiResponse = await callGroqChat(transcript, 'id', voiceSystemPrompt);
         console.log(`[Voice Chat] AI: ${aiResponse}`);
 
