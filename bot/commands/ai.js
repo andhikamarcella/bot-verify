@@ -342,7 +342,8 @@ async function callGroqChat(prompt, language = 'id', systemPrompt = null) {
   return response?.content || 'Maaf, aku tidak bisa menjawab saat ini.';
 }
 
-// Export the callGroqChat function separately for use in other files
+// Export functions for use in other files
+module.exports.callGroq = callGroq;
 module.exports.callGroqChat = callGroqChat;
 
 module.exports = {
