@@ -1,645 +1,523 @@
-const express = require('express');
 const crypto = require('crypto');
-const { Events } = require('discord.js');
-const client = require('../../bot/discordClient');
+const {
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  ChannelType,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+} = require('discord.js');
+const { connectMongo } = require('../../api/lib/db');
+
+// Dynamic require with fallback for deployment environment
+let tokensModel;
+try {
+  tokensModel = require('../../api/models/Tokens');
+} catch (error) {
+  console.error('[Verify] Failed to load Tokens model from relative path, trying absolute path...');
+  try {
+    tokensModel = require('/app/api/models/Tokens');
+  } catch (absError) {
+    console.error('[Verify] Failed to load Tokens model from absolute path, trying alternative...');
+    try {
+      tokensModel = require('../models/Tokens');
+    } catch (altError) {
+      console.error('[Verify] All attempts to load Tokens model failed:', altError);
+      throw new Error('Cannot load Tokens model');
+    }
+  }
+}
+
 const {
   createTokenDocument,
-  findToken,
-  setTokenStatus,
-  bindIpToToken,
+  findLatestByUser,
   listDmMessagesForUser,
+  setTokenStatus,
   clearTokenDmFields,
-} = require('../models/Tokens');
-const { upsertUserProfile } = require('../models/Users');
-const { insertLog } = require('../models/VerificationLog');
-const { hashIp } = require('../lib/hashIp');
-const { verifyTurnstile } = require('../lib/turnstile');
-const { getExtraRolesForUser } = require('../lib/roleSync');
-const { connectMongo } = require('../lib/db');
-const { getGuildConfig } = require('../models/GuildConfig');
-const { getBlacklistEntry } = require('../models/BlacklistedUsers');
+} = tokensModel;
+const { getExtraRolesForUser } = require('../../api/lib/roleSync');
+const { fetchConfig, updateConfig } = require('../utils/guildConfig');
+const { shouldRateLimit } = require('../utils/rateLimiter');
 const {
   getVerificationProfile,
   upsertVerificationProfile,
-  setRiskScore,
-} = require('../models/VerificationProfiles');
-const { insertHistoryEntry, clearHistoryForUser } = require('../models/VerificationHistory');
-const { computeRiskScore } = require('../lib/riskScore');
-const { sendVerificationLog } = require('../../bot/utils/logging');
+} = require('../../api/models/VerificationProfiles');
+const { getUserProfile, clearUserVerification } = require('../../api/models/Users');
+const { insertHistoryEntry, getHistoryForUser } = require('../../api/models/VerificationHistory');
+const { sendVerificationLog } = require('../utils/logging');
+const { describeRisk } = require('../../api/lib/riskScore');
+const { getBlacklistEntry } = require('../../api/models/BlacklistedUsers');
+const {
+  ensureStaff,
+  isStaff,
+  isMemberOrHigher,
+  hasNonEveryoneRole,
+  isStaffMember,
+} = require('../utils/permissions');
 
-const router = express.Router();
-
-const GUILD_ID = process.env.GUILD_ID;
+const FRONTEND_BASE = (process.env.PUBLIC_FRONTEND_URL || '').replace(/\/$/, '');
 const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;
-const WELCOME_CHANNEL_ID = process.env.WELCOME_CHANNEL_ID;
-const FRONTEND_URL = process.env.PUBLIC_FRONTEND_URL || '';
-const DISCORD_BROWSER_URL = process.env.DISCORD_BROWSER_URL || null;
-const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '';
 
-function renderNicknameTemplate(template, context) {
-  if (!template) {
-    return '';
-  }
-  return template.replace(/{{\s*([^}]+)\s*}}/g, (_match, key) => {
-    const normalized = String(key || '').trim();
-    if (!normalized) return '';
-    const value = context[normalized];
-    if (value === null || value === undefined) {
-      return '';
-    }
-    if (typeof value === 'string') {
-      return value;
-    }
-    if (typeof value === 'number') {
-      return String(value);
-    }
-    return '';
-  });
-}
-
-async function ensureReady() {
+async function ensureMongo() {
   await connectMongo();
-  if (!client.isReady()) {
-    await new Promise((resolve) => client.once(Events.ClientReady, resolve));
-  }
 }
 
-// Pre-verification Check & Environment Check
-router.get('/pre-check', async (req, res) => {
-  try {
-    const { token } = req.query;
-    const ip = req.ip;
-    const currentIpHash = hashIp(ip);
+function ensureAdmin(interaction) {
+  ensureStaff(interaction);
+}
 
-    await ensureReady();
+async function sendVerificationDm(user, url) {
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setLabel('Verify Me').setStyle(ButtonStyle.Link).setURL(url)
+  );
+  const message = await user.send({
+    content: [
+      'Halo! Klik tombol di bawah untuk memulai verifikasi.',
+      '',
+      'Kalau tombol tidak muncul / tidak bisa diklik, gunakan link ini:',
+      url,
+    ].join('\n'),
+    components: [row],
+  });
+  return message;
+}
 
-    // 1. Environment Check
-    const envStatus = {
-      botOnline: client.isReady(),
-      apiLatency: client.ws.ping,
-      guildId: GUILD_ID,
-      maintenanceMode: false,
-    };
-
-    if (token) {
-        const record = await findToken(token);
-        if (!record) {
-            return res.json({ ok: false, error: 'invalid-token', envStatus });
-        }
-        
-        const config = await getGuildConfig(record.guildId);
-        envStatus.maintenanceMode = config.maintenanceMode;
-
-        if (config.maintenanceMode) {
-            return res.json({ 
-                ok: false, 
-                error: 'maintenance-mode', 
-                reason: config.maintenanceReason || 'System maintenance',
-                envStatus 
-            });
-        }
-
-        // Token Expiration Check
-        const createdAt = record.createdAt ? new Date(record.createdAt) : new Date();
-        const diffMinutes = (Date.now() - createdAt.getTime()) / (1000 * 60);
-        if (diffMinutes > 15) {
-             return res.json({ ok: false, error: 'token-expired', envStatus });
-        }
-
-        // One-Time URL Protection (Bind IP)
-        if (record.boundIp && record.boundIp !== currentIpHash) {
-             return res.json({ ok: false, error: 'link-used-on-other-device', envStatus });
-        }
-        
-        if (!record.boundIp) {
-            await bindIpToToken(token, currentIpHash);
-        }
-
-        let nicknameSuggestions = [];
-        try {
-          const guild = await client.guilds.fetch(record.guildId);
-          const member = await guild.members.fetch(record.userId).catch(() => null);
-          const user = member?.user || (await client.users.fetch(record.userId).catch(() => null));
-          const candidates = [
-            member?.displayName,
-            user?.globalName,
-            user?.username,
-          ]
-            .map((v) => (typeof v === 'string' ? v.trim() : ''))
-            .filter(Boolean)
-            .map((v) => v.replace(/\s+/g, ' ').trim().slice(0, 32));
-          nicknameSuggestions = Array.from(new Set(candidates));
-        } catch (_) {
-          nicknameSuggestions = [];
-        }
-
-        return res.json({ 
-            ok: true, 
-            tokenValid: true, 
-            expiresIn: Math.max(0, 15 * 60 * 1000 - (Date.now() - createdAt.getTime())),
-            envStatus,
-            nicknameSuggestions,
-        });
+async function handleStart(interaction) {
+  const blacklistEntry = await getBlacklistEntry(interaction.user.id, interaction.guildId).catch(() => null);
+  if (blacklistEntry) {
+    const blacklistedMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (blacklistedMember) {
+      await blacklistedMember.kick(`Blacklisted: ${blacklistEntry.reason || 'unspecified'}`).catch(() => {});
     }
-
-    return res.json({ ok: true, envStatus });
-
-  } catch (error) {
-    console.error('pre-check error', error);
-    res.status(500).json({ ok: false, error: 'pre-check-failed' });
-  }
-});
-
-
-router.post('/create-token', async (req, res) => {
-  try {
-    const { userId } = req.body || {};
-    if (!userId) {
-      return res.status(400).json({ ok: false, error: 'missing-userId' });
-    }
-
-    await ensureReady();
-
-    const blacklistEntry = await getBlacklistEntry(userId, GUILD_ID).catch(() => null);
-    if (blacklistEntry) {
-      try {
-        const guild = await client.guilds.fetch(GUILD_ID);
-        const member = await guild.members.fetch(userId).catch(() => null);
-        if (member) {
-          await member.kick(`Blacklisted: ${blacklistEntry.reason || 'unspecified'}`).catch(() => {});
-        }
-      } catch (_) {
-        // ignore
-      }
-      return res.status(403).json({ ok: false, error: 'blacklisted' });
-    }
-
-    const extraRoles = await getExtraRolesForUser(client, userId);
-    const token = crypto.randomUUID();
-    await createTokenDocument({
-      token,
-      userId,
-      guildId: GUILD_ID,
-      roleId: MEMBER_ROLE_ID,
-      status: 'PENDING',
-      extraRolesEligible: extraRoles,
-      createdAt: new Date(),
-    });
-    await upsertVerificationProfile({
-      userId,
-      guildId: GUILD_ID,
-      incrementAttempts: true,
-    });
-
-    const verificationUrl = `${FRONTEND_URL.replace(/\/$/, '')}/verify?token=${token}`;
-    res.json({ ok: true, token, verificationUrl });
-  } catch (error) {
-    console.error('create-token error', error);
-    res.status(500).json({ ok: false, error: 'create-token-failed' });
-  }
-});
-
-router.post('/regenerate-token', async (req, res) => {
-  try {
-    const { token } = req.body || {};
-    if (!token) {
-      return res.status(400).json({ ok: false, error: 'missing-token' });
-    }
-
-    await ensureReady();
-
-    const record = await findToken(token);
-    if (!record) {
-      return res.status(400).json({ ok: false, error: 'invalid-token' });
-    }
-
-    const config = await getGuildConfig(record.guildId);
-    if (config.maintenanceMode) {
-      return res.status(503).json({
-        ok: false,
-        error: 'maintenance-mode',
-        reason: config.maintenanceReason || 'System maintenance',
-      });
-    }
-
-    const currentIpHash = hashIp(req.ip);
-    if (record.boundIp && record.boundIp !== currentIpHash) {
-      return res.status(403).json({ ok: false, error: 'link-used-on-other-device' });
-    }
-
-    const blacklistEntry = await getBlacklistEntry(record.userId, record.guildId).catch(() => null);
-    if (blacklistEntry) {
-      return res.status(403).json({ ok: false, error: 'blacklisted' });
-    }
-
-    const extraRoles = await getExtraRolesForUser(client, record.userId);
-    const newToken = crypto.randomUUID();
-    await createTokenDocument({
-      token: newToken,
-      userId: record.userId,
-      guildId: record.guildId,
-      roleId: record.roleId || MEMBER_ROLE_ID,
-      status: 'PENDING',
-      extraRolesEligible: extraRoles,
-      createdAt: new Date(),
-    });
-
-    await upsertVerificationProfile({
-      userId: record.userId,
-      guildId: record.guildId,
-      incrementAttempts: true,
-    }).catch(() => {});
-
-    await setTokenStatus(token, 'EXPIRED', { replacedBy: newToken, replacedAt: new Date() }).catch(() => {});
-
-    const verificationUrl = `${FRONTEND_URL.replace(/\/$/, '')}/verify?token=${newToken}`;
-    return res.json({ ok: true, token: newToken, verificationUrl });
-  } catch (error) {
-    console.error('regenerate-token error', error);
-    res.status(500).json({ ok: false, error: 'regenerate-token-failed' });
-  }
-});
-
-router.post('/verify', async (req, res) => {
-  try {
-    const { token, captchaResult, ip: bodyIp, country, profile: submittedProfile } = req.body || {};
-    if (!token) {
-      return res.status(400).json({ ok: false, error: 'missing-token' });
-    }
-    const record = await findToken(token);
-    if (!record || record.status !== 'PENDING') {
-      return res.status(400).json({ ok: false, error: 'invalid-token' });
-    }
-
-    const config = await getGuildConfig(record.guildId);
-    
-    // Maintenance Check
-    if (config.maintenanceMode) {
-        return res.status(503).json({ ok: false, error: 'maintenance-mode', reason: config.maintenanceReason });
-    }
-
-    const profile = await getVerificationProfile(record.userId, record.guildId);
-    const suspectReasons = profile?.suspectReasons || [];
-
-    const createdAt = record.createdAt ? new Date(record.createdAt) : new Date();
-    if (Date.now() - createdAt.getTime() > 15 * 60 * 1000) {
-      await setTokenStatus(token, 'FAILED', { failureReason: 'expired' });
-      await insertLog({
-        userId: record.userId,
-        guildId: record.guildId,
-        ipHash: hashIp(bodyIp || req.ip),
-        result: 'FAILED',
-        reason: 'expired',
-      });
-      await insertHistoryEntry({
-        userId: record.userId,
-        guildId: record.guildId,
-        status: 'failed',
-        reason: 'token-expired',
-      });
-      const user = await client.users.fetch(record.userId).catch(() => null);
-      await sendVerificationLog({
-        client,
-        guildId: record.guildId,
-        config,
-        user,
-        type: 'failure',
-        status: 'FAILED',
-        riskScore: profile?.riskScore ?? 0,
-        suspectReasons,
-        reason: 'Token expired before completion',
-      });
-      return res.status(400).json({ ok: false, error: 'token-expired' });
-    }
-
-    // Turnstile Verification
-    let captchaOk = false;
-    let captchaError = null;
-    
-    console.log('[Verify] Starting captcha validation', {
-      type: captchaResult?.type,
-      hasValue: !!captchaResult?.value,
-      valueLength: captchaResult?.value?.length,
-      hasSecretKey: !!TURNSTILE_SECRET_KEY,
-      secretKeyLength: TURNSTILE_SECRET_KEY?.length,
-      secretKeyPrefix: TURNSTILE_SECRET_KEY ? TURNSTILE_SECRET_KEY.substring(0, 15) + '...' : 'MISSING',
-      ip: bodyIp || req.ip,
-      userAgent: req.get('user-agent')?.substring(0, 50)
-    });
-
-    if (captchaResult?.type === 'turnstile') {
-      if (!captchaResult.value || captchaResult.value.trim() === '') {
-        console.error('[Verify] Turnstile token is empty');
-        captchaError = 'Token is empty';
-        captchaOk = false;
-      } else if (!TURNSTILE_SECRET_KEY || TURNSTILE_SECRET_KEY.trim() === '') {
-        console.error('[Verify] TURNSTILE_SECRET_KEY is not set in environment variables!');
-        console.error('[Verify] Please check your Railway/Vercel environment variables');
-        captchaError = 'Secret key not configured';
-        captchaOk = false;
-      } else if (TURNSTILE_SECRET_KEY.length < 20) {
-        console.error('[Verify] TURNSTILE_SECRET_KEY seems too short:', TURNSTILE_SECRET_KEY.length);
-        captchaError = 'Secret key invalid format';
-        captchaOk = false;
-      } else {
-        console.log('[Verify] Calling verifyTurnstile with token length:', captchaResult.value.length);
-        captchaOk = await verifyTurnstile(captchaResult.value, TURNSTILE_SECRET_KEY, bodyIp || req.ip);
-        if (!captchaOk) {
-          captchaError = 'Cloudflare validation failed';
-        }
-      }
-    } else if (captchaResult?.type === 'fallbackEmoji') {
-      // Check if strict mode is enabled
-      const TURNSTILE_STRICT = process.env.TURNSTILE_STRICT === 'true';
-      if (TURNSTILE_STRICT) {
-        console.error('[Verify] TURNSTILE_STRICT is enabled, fallback emoji not allowed');
-        captchaError = 'Turnstile required (strict mode)';
-        captchaOk = false;
-      } else {
-        captchaOk = captchaResult.value === 'ok';
-        console.log('[Verify] Using fallback emoji captcha', { ok: captchaOk });
-      }
-    } else {
-      console.error('[Verify] Unknown captcha type:', captchaResult?.type);
-      captchaError = 'Unknown captcha type';
-      captchaOk = false;
-    }
-
-    console.log('[Verify] Captcha validation result:', { 
-      ok: captchaOk, 
-      error: captchaError,
-      type: captchaResult?.type 
-    });
-
-    if (!captchaOk) {
-      const failureReason = captchaError || 'captcha validation failed';
-      console.error('[Verify] Captcha validation failed:', failureReason);
-      
-      await setTokenStatus(token, 'FAILED', { failureReason: 'captcha', details: captchaError });
-      await insertLog({
-        userId: record.userId,
-        guildId: record.guildId,
-        ipHash: hashIp(bodyIp || req.ip),
-        result: 'FAILED',
-        reason: 'captcha-invalid',
-      });
-      await insertHistoryEntry({
-        userId: record.userId,
-        guildId: record.guildId,
-        status: 'failed',
-        reason: 'captcha-invalid',
-      });
-      const user = await client.users.fetch(record.userId).catch(() => null);
-      await sendVerificationLog({
-        client,
-        guildId: record.guildId,
-        config,
-        user,
-        type: 'failure',
-        status: 'FAILED',
-        riskScore: profile?.riskScore ?? 0,
-        suspectReasons,
-        reason: `Captcha validation failed: ${failureReason}`,
-      });
-      return res.status(400).json({ 
-        ok: false, 
-        error: 'captcha-invalid',
-        reason: captchaError || 'Captcha validation failed'
-      });
-    }
-
-    const guild = await client.guilds.fetch(GUILD_ID);
-    const member = await guild.members.fetch(record.userId);
-    const user = member.user;
-    const blacklistEntry = await getBlacklistEntry(record.userId, record.guildId);
-
-    if (blacklistEntry) {
-      await setTokenStatus(token, 'FAILED', { failureReason: 'blacklisted' }).catch(() => {});
-      await insertLog({
-        userId: record.userId,
-        guildId: record.guildId,
-        ipHash: hashIp(bodyIp || req.ip),
-        result: 'FAILED',
-        reason: 'blacklisted',
-      }).catch(() => {});
-      await insertHistoryEntry({
-        userId: record.userId,
-        guildId: record.guildId,
-        status: 'failed',
-        reason: `blacklisted:${blacklistEntry.reason || 'unspecified'}`,
-      }).catch(() => {});
-      await sendVerificationLog({
-        client,
-        guildId: record.guildId,
-        config,
-        user,
-        member,
-        type: 'failure',
-        status: 'BLACKLISTED',
-        riskScore: profile?.riskScore ?? 100,
-        suspectReasons,
-        reason: `Blacklisted: ${blacklistEntry.reason || 'unspecified'}`,
-      }).catch(() => {});
-      await member.kick(`Blacklisted: ${blacklistEntry.reason || 'unspecified'}`).catch(() => {});
-      return res.status(403).json({ ok: false, error: 'blacklisted' });
-    }
-
-    const requestedDisplayName =
-      submittedProfile && typeof submittedProfile === 'object' && typeof submittedProfile.displayName === 'string'
-        ? submittedProfile.displayName
-        : '';
-    const nicknameFromUser = String(requestedDisplayName || '')
-      .replace(/\s+/g, ' ')
-      .replace(/[\r\n\t]/g, ' ')
-      .trim()
-      .slice(0, 32);
-
-    const requestedReason =
-      submittedProfile && typeof submittedProfile === 'object' && typeof submittedProfile.applicationReason === 'string'
-        ? submittedProfile.applicationReason
-        : '';
-    const applicationReason = String(requestedReason || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 500);
-    if (applicationReason.length < 10) {
-      return res.status(400).json({ ok: false, error: 'application-reason-too-short' });
-    }
-
-    const applicationTextLength = applicationReason.length;
-    const reviewStatus = applicationTextLength < 100 ? 'INTERVIEW_REQUIRED' : 'PENDING_REVIEW';
-    const application = {
-      displayName: nicknameFromUser || null,
-      applicationReason,
-      country: country || null,
-    };
-
-    await setTokenStatus(token, reviewStatus, {
-      application,
-      applicationTextLength,
-      reviewDecision: null,
-      reviewedAt: null,
-      reviewedBy: null,
-      reviewNotes: null,
-      interviewQuestionSentAt: reviewStatus === 'INTERVIEW_REQUIRED' ? new Date() : null,
-    });
-
     try {
-      const oldMessages = await listDmMessagesForUser(record.userId, record.guildId, 50).catch(() => []);
-      for (const item of oldMessages) {
-        const channelId = item?.dmChannelId;
-        const messageId = item?.dmMessageId;
-        if (!channelId || !messageId) continue;
-        try {
-          const dmChannel = await client.channels.fetch(channelId).catch(() => null);
-          if (dmChannel?.messages) {
-            const msg = await dmChannel.messages.fetch(messageId).catch(() => null);
-            if (msg && msg.author?.id === client.user.id) {
-              await msg.delete().catch(() => {});
-            }
-          }
-        } catch (_) {
-          // ignore
-        }
-        await clearTokenDmFields(item.token).catch(() => {});
+      if (typeof interaction.deferUpdate === 'function' && interaction.isButton?.()) {
+        await interaction.deferUpdate().catch(() => {});
+      } else {
+        await interaction.reply({ content: ' ', flags: 64 });
+        await interaction.deleteReply().catch(() => {});
       }
     } catch (_) {
       // ignore
     }
+    return;
+  }
 
-    await sendVerificationLog({
-      client,
-      guildId: record.guildId,
-      config,
-      user,
-      member,
-      type: 'info',
-      status: reviewStatus,
-      riskScore: profile?.riskScore ?? 0,
-      country: country || null,
-      suspectReasons,
-      reason: `Token: ${token}\nReason(${applicationTextLength}): ${applicationReason}`,
+  if (!FRONTEND_BASE) {
+    await interaction.reply({
+      content: 'Konfigurasi FRONTEND belum tersedia. Hubungi admin.',
+      flags: 64,
     });
+    return;
+  }
 
-    if (reviewStatus === 'INTERVIEW_REQUIRED') {
+  const currentMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+  if (currentMember) {
+    if (isStaffMember(currentMember)) {
+      await interaction.reply({
+        content: 'Kamu staff/admin, verifikasi tidak diperlukan.',
+        flags: 64,
+      });
+      return;
+    }
+    if (hasNonEveryoneRole(currentMember)) {
+      await interaction.reply({
+        content: 'Kamu sudah punya role di server, verifikasi tidak diperlukan.',
+        flags: 64,
+      });
+      return;
+    }
+  }
+  if (shouldRateLimit(interaction.user.id, `verify-start:${interaction.guildId}`, 30 * 1000)) {
+    await interaction.reply({
+      content: 'Tolong tunggu sebentar sebelum meminta link verifikasi lagi.',
+      flags: 64,
+    });
+    return;
+  }
+
+  await ensureMongo();
+  const extraRoles = await getExtraRolesForUser(interaction.client, interaction.user.id);
+  const token = crypto.randomUUID();
+  await createTokenDocument({
+    token,
+    userId: interaction.user.id,
+    guildId: interaction.guildId,
+    roleId: MEMBER_ROLE_ID,
+    status: 'PENDING',
+    extraRolesEligible: extraRoles,
+    createdAt: new Date(),
+  });
+  await upsertVerificationProfile({
+    userId: interaction.user.id,
+    guildId: interaction.guildId,
+    incrementAttempts: true,
+  });
+  const verifyUrl = `${FRONTEND_BASE}/verify?token=${token}`;
+
+  try {
+    const oldMessages = await listDmMessagesForUser(interaction.user.id, interaction.guildId, 25).catch(() => []);
+    for (const item of oldMessages) {
+      const channelId = item?.dmChannelId;
+      const messageId = item?.dmMessageId;
+      if (!channelId || !messageId) continue;
       try {
-        await user.send(
-          [
-            'Aplikasimu butuh interview singkat karena jawaban kamu terlalu singkat.',
-            'Balas DM ini dengan alasan join yang lebih lengkap (minimal 100 karakter).',
-            '',
-            'Contoh: tujuan join, minat, pengalaman, dan aturan yang kamu pahami.',
-          ].join('\n')
-        );
+        const dmChannel = await interaction.client.channels.fetch(channelId).catch(() => null);
+        if (dmChannel?.messages) {
+          const msg = await dmChannel.messages.fetch(messageId).catch(() => null);
+          if (msg && msg.author?.id === interaction.client.user.id) {
+            await msg.delete().catch(() => {});
+          }
+        }
       } catch (_) {
         // ignore
       }
+      await clearTokenDmFields(item.token).catch(() => {});
     }
-
-    return res.json({
-      ok: true,
-      reviewStatus,
-      badgeEmoji: '🛡️',
-      userId: record.userId,
-      mobileDeepLink: DISCORD_BROWSER_URL,
-    });
-  } catch (error) {
-    console.error('verify error', error);
-    res.status(500).json({ ok: false, error: 'verification-failed' });
+  } catch (_) {
+    // ignore
   }
-});
 
-// Health check endpoint
-router.get('/health', (req, res) => {
-  console.log('[API] Health check requested');
-  res.json({ 
-    ok: true, 
-    status: 'API Server is running',
-    timestamp: new Date().toISOString()
+  try {
+    const dmMessage = await sendVerificationDm(interaction.user, verifyUrl);
+    if (dmMessage?.channel?.id && dmMessage?.id) {
+      await setTokenStatus(token, 'PENDING', {
+        dmChannelId: dmMessage.channel.id,
+        dmMessageId: dmMessage.id,
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.error('Gagal mengirim DM verifikasi', err);
+    await interaction.reply({
+      content:
+        'Tidak dapat mengirim DM. Tolong buka DM kamu dan jalankan /verify start lagi atau gunakan panel verifikasi.',
+      flags: 64,
+    });
+    return;
+  }
+
+  await interaction.reply({
+    content: 'Link verifikasi sudah dikirim ke DM kamu. Cek DM ya! ✅',
+    flags: 64,
   });
-});
+}
 
-// GET /api/interview-status?token=xxx
-router.get('/interview-status', async (req, res) => {
-  const { token } = req.query || {};
-  console.log('[API] Interview status request for token:', token);
-  
-  if (!token) {
-    console.log('[API] Missing token parameter');
-    return res.status(400).json({ ok: false, error: 'missing-token' });
+async function buildStatusEmbed(interaction, targetUserId) {
+  await ensureMongo();
+  const profile = await getUserProfile(targetUserId, interaction.guildId);
+  const verificationProfile = await getVerificationProfile(targetUserId, interaction.guildId);
+  const member = await interaction.guild.members.fetch(targetUserId).catch(() => null);
+
+  const nickname = member?.displayName || null;
+
+  const riskScore = verificationProfile?.riskScore ?? 0;
+  const riskInfo = describeRisk(riskScore);
+
+  const embed = new EmbedBuilder()
+    .setTitle('Status Verifikasi')
+    .setColor(
+      riskInfo.label === 'HIGH' ? 0xed4245 : riskInfo.label === 'MEDIUM' ? 0xfaa61a : 0x57f287
+    );
+
+  if (nickname) {
+    embed.addFields({ name: 'Nickname', value: nickname, inline: true });
   }
 
-  try {
-    await connectMongo();
-    console.log('[API] Connected to MongoDB, finding token...');
-    
-    const record = await findToken(token);
-    console.log('[API] Token record found:', !!record);
-    
-    if (!record) {
-      console.log('[API] Token not found in database');
-      return res.status(400).json({ ok: false, error: 'invalid-token' });
+  const accountCreatedAt =
+    verificationProfile?.accountCreatedAt || member?.user?.createdAt || profile?.verifiedAt || null;
+  let accountAgeDays = null;
+  if (accountCreatedAt) {
+    const diff = Date.now() - new Date(accountCreatedAt).getTime();
+    accountAgeDays = Math.max(Math.floor(diff / (1000 * 60 * 60 * 24)), 0);
+  }
+
+  if (profile) {
+    embed.setDescription(`<@${targetUserId}> sudah diverifikasi.`);
+    embed.addFields(
+      { name: 'Badge', value: `${profile.badgeEmoji || '🛡️'} ${profile.badgeName || 'Verified Member'}`, inline: true },
+      {
+        name: 'Verified At',
+        value: profile.verifiedAt ? new Date(profile.verifiedAt).toISOString() : '—',
+        inline: true,
+      }
+    );
+    if (profile.country) {
+      embed.addFields({ name: 'Country', value: profile.country, inline: true });
     }
+  } else {
+    embed.setDescription(`<@${targetUserId}> belum diverifikasi.`);
+  }
 
-    console.log('[API] Token record data:', {
-      status: record.status,
-      userId: record.userId,
-      guildId: record.guildId,
-      interviewLink: !!record.interviewLink
+  if (accountAgeDays !== null) {
+    embed.addFields({ name: 'Account Age', value: `${accountAgeDays} hari`, inline: true });
+  }
+
+  embed.addFields({
+    name: 'Risk',
+    value: `${riskInfo.emoji} ${riskInfo.text} (${riskScore})`,
+    inline: true,
+  });
+
+  const isSuspect = Boolean(verificationProfile?.isSuspect || verificationProfile?.suspectReasons?.length);
+  embed.addFields({ name: 'Suspect?', value: isSuspect ? 'YES 🚨' : 'No', inline: true });
+
+  if (verificationProfile?.suspectReasons?.length) {
+    embed.addFields({
+      name: 'Flags',
+      value: verificationProfile.suspectReasons.join(', '),
+      inline: false,
     });
-
-    const response = {
-      ok: true,
-      status: record.status,
-      interviewLink: record.interviewLink || null,
-      interviewSubmittedAt: record.interviewSubmittedAt || null,
-      reviewStatus: record.reviewStatus || null,
-      reason: record.reason || null,
-    };
-
-    console.log('[API] Sending response:', response);
-    res.json(response);
-  } catch (err) {
-    console.error('[API] Interview status error:', err);
-    res.status(500).json({ ok: false, error: 'internal-error' });
-  }
-});
-
-// POST /api/interview-submit (bot calls this when user submits interview via DM)
-router.post('/interview-submit', async (req, res) => {
-  const { token, answers } = req.body || {};
-  if (!token) {
-    return res.status(400).json({ ok: false, error: 'missing-token' });
   }
 
-  try {
-    await connectMongo();
-    const record = await findToken(token);
-    if (!record || record.status !== 'INTERVIEW_REQUIRED') {
-      return res.status(400).json({ ok: false, error: 'invalid-token-or-status' });
+  embed.setFooter({ text: `User ID: ${targetUserId}` });
+  return embed;
+}
+
+async function handleStatus(interaction) {
+  const target = interaction.options.getUser('target') || interaction.user;
+  if (target.id !== interaction.user.id && !isMemberOrHigher(interaction) && !isStaff(interaction)) {
+    await interaction.reply({ content: 'Kamu tidak punya izin untuk cek status user lain.', flags: 64 });
+    return;
+  }
+  const embed = await buildStatusEmbed(interaction, target.id);
+  await interaction.reply({ embeds: [embed], flags: 64 });
+}
+
+async function handleReset(interaction, client) {
+  ensureAdmin(interaction);
+  const target = interaction.options.getUser('target');
+  if (!target) {
+    await interaction.reply({ content: 'Kamu harus memilih user.', flags: 64 });
+    return;
+  }
+
+  await ensureMongo();
+  const guild = await client.guilds.fetch(interaction.guildId);
+  const member = await guild.members.fetch(target.id).catch(() => null);
+  if (member && MEMBER_ROLE_ID && member.roles.cache.has(MEMBER_ROLE_ID)) {
+    try {
+      await member.roles.remove(MEMBER_ROLE_ID, 'Verification reset via command');
+    } catch (err) {
+      console.warn('Gagal menghapus role saat reset', err?.message);
     }
-
-    // Update token with interview answers
-    await setTokenStatus(token, 'INTERVIEW_ANSWERED', {
-      interviewAnswers: answers,
-      interviewSubmittedAt: new Date().toISOString(),
-    });
-
-    // Log interview submission
-    await sendVerificationLog({
-      client,
-      guildId: record.guildId,
-      config: await getGuildConfig(record.guildId),
-      user: { id: record.userId, tag: `User ${record.userId}` },
-      member: null,
-      type: 'INTERVIEW_SUBMITTED',
-      status: 'INTERVIEW_ANSWERED',
-      riskScore: 0,
-      reason: `Interview submitted via DM`,
-    });
-
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('[API] Interview submit error:', err);
-    res.status(500).json({ ok: false, error: 'internal-error' });
   }
-});
 
-module.exports = router;
+  const latest = await findLatestByUser(target.id, interaction.guildId);
+  if (latest) {
+    await setTokenStatus(latest.token, 'FAILED', { failureReason: 'manual-reset' }).catch(() => {});
+  }
+  await clearUserVerification(target.id, interaction.guildId);
+  const verificationProfile = await getVerificationProfile(target.id, interaction.guildId);
+  const riskScore = verificationProfile?.riskScore ?? 0;
+  await insertHistoryEntry({
+    userId: target.id,
+    guildId: interaction.guildId,
+    status: 'reset',
+    reason: `Reset by ${interaction.user.id}`,
+    riskScore,
+  });
+
+  const config = await fetchConfig(interaction.guildId);
+  await sendVerificationLog({
+    client,
+    guildId: interaction.guildId,
+    config,
+    user: target,
+    member,
+    type: 'failure',
+    status: 'RESET',
+    riskScore,
+    reason: `Verification reset oleh ${interaction.user.tag}`,
+  });
+
+  await interaction.reply({
+    content: `Status verifikasi <@${target.id}> telah direset.`,
+    flags: 64,
+  });
+}
+
+async function handleHistory(interaction) {
+  ensureAdmin(interaction);
+  const target = interaction.options.getUser('target');
+  if (!target) {
+    await interaction.reply({ content: 'Kamu harus memilih user.', flags: 64 });
+    return;
+  }
+  await ensureMongo();
+  const entries = await getHistoryForUser(target.id, interaction.guildId, 10);
+  if (!entries.length) {
+    await interaction.reply({ content: 'Belum ada riwayat.', flags: 64 });
+    return;
+  }
+  const lines = entries.map((entry) => {
+    const reasonText = entry.reason ? ` — ${entry.reason}` : '';
+    return `• ${new Date(entry.createdAt).toISOString()} — ${entry.status.toUpperCase()} (risk ${
+      entry.riskScore ?? 'n/a'
+    })${reasonText}`;
+  });
+  await interaction.reply({ content: lines.join('\n'), flags: 64 });
+}
+
+async function handlePanelCreate(interaction) {
+  ensureAdmin(interaction);
+  const targetChannel = interaction.options.getChannel('channel');
+  if (!targetChannel || targetChannel.type !== ChannelType.GuildText) {
+    await interaction.reply({ content: 'Pilih channel text.', flags: 64 });
+    return;
+  }
+  if (!FRONTEND_BASE) {
+    await interaction.reply({ content: 'PUBLIC_FRONTEND_URL belum diset.', flags: 64 });
+    return;
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('verify:panel:start')
+      .setLabel('Start Verification')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('verify:panel:help').setLabel('Help').setStyle(ButtonStyle.Secondary)
+  );
+
+  const embed = new EmbedBuilder()
+    .setTitle('🛡️ Server Verification')
+    .setColor(0x5865f2)
+    .setDescription(
+      [
+        'Selamat datang! Klik tombol **Start Verification** untuk membuka portal verifikasi.',
+        'Bot akan mengirim link unik ke DM kamu dan meminta kamu menyelesaikan captcha.',
+        '',
+        'Kalau butuh bantuan, gunakan tombol **Help** atau jalankan `/help`.',
+      ].join('\n')
+    )
+    .setFooter({ text: 'Gunakan tombol di bawah ini untuk mendapatkan akses Member.' });
+
+  const message = await targetChannel.send({
+    embeds: [embed],
+    components: [row],
+  });
+  await updateConfig(interaction.guildId, {
+    panelChannelId: targetChannel.id,
+    panelMessageId: message.id,
+  });
+  await interaction.reply({
+    content: `Panel verifikasi dikirim ke <#${targetChannel.id}>.`,
+    flags: 64,
+  });
+}
+
+async function handleDebug(interaction, client) {
+  ensureAdmin(interaction);
+  await ensureMongo();
+  const config = await fetchConfig(interaction.guildId);
+  const guild = await client.guilds.fetch(interaction.guildId);
+  const me = await guild.members.fetch(client.user.id);
+  const checks = [
+    { name: 'MongoDB', value: '✅ Terhubung' },
+    { name: 'Logs Channel', value: config.logsChannelId ? `✅ <#${config.logsChannelId}>` : '⚠️ belum diset' },
+    { name: 'Manage Roles', value: me.permissions.has(PermissionFlagsBits.ManageRoles) ? '✅' : '❌' },
+    { name: 'Member Role', value: MEMBER_ROLE_ID ? `ID: ${MEMBER_ROLE_ID}` : '❌ belum diisi' },
+  ];
+  const embed = new EmbedBuilder()
+    .setTitle('Verification Debug')
+    .setColor(0x5865f2)
+    .addFields(checks)
+    .setTimestamp(new Date());
+  await interaction.reply({ embeds: [embed], flags: 64 });
+}
+
+module.exports = {
+  data: new SlashCommandBuilder()
+    .setName('verify')
+    .setDescription('Mulai verifikasi atau kelola sistem verifikasi')
+    .setDMPermission(false)
+    .addSubcommand((sub) =>
+      sub
+        .setName('start')
+        .setDescription('Kirim tautan verifikasi ke DM kamu')
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('status')
+        .setDescription('Lihat status verifikasi')
+        .addUserOption((option) => option.setName('target').setDescription('User yang ingin dicek'))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('reset')
+        .setDescription('Reset status verifikasi seorang member')
+        .addUserOption((option) => option.setName('target').setDescription('User yang akan direset').setRequired(true))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('history')
+        .setDescription('Lihat riwayat verifikasi')
+        .addUserOption((option) => option.setName('target').setDescription('User yang ingin dicek').setRequired(true))
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('panel')
+        .setDescription('Kelola panel verifikasi')
+        .addSubcommand((sub) =>
+          sub
+            .setName('create')
+            .setDescription('Kirim panel verifikasi ke sebuah channel')
+            .addChannelOption((option) =>
+              option
+                .setName('channel')
+                .setDescription('Channel tujuan panel')
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildText)
+            )
+        )
+    )
+    .addSubcommand((sub) =>
+      sub.setName('debug').setDescription('Periksa konfigurasi dan perizinan bot')
+    ),
+
+  async execute(interaction, client) {
+    const subcommandGroup = interaction.options.getSubcommandGroup(false);
+    const subcommand = interaction.options.getSubcommand(false);
+
+    try {
+      if (subcommandGroup === 'panel') {
+        await handlePanelCreate(interaction);
+        return;
+      }
+
+      switch (subcommand) {
+        case 'start':
+        case null:
+          await handleStart(interaction);
+          break;
+        case 'status':
+          await handleStatus(interaction);
+          break;
+        case 'reset':
+          await handleReset(interaction, client);
+          break;
+        case 'history':
+          await handleHistory(interaction);
+          break;
+        case 'debug':
+          await handleDebug(interaction, client);
+          break;
+        default:
+          await interaction.reply({ content: 'Subcommand tidak dikenal.', flags: 64 });
+      }
+    } catch (error) {
+      if (error.message === 'no-permission') {
+        await interaction.reply({ content: 'Kamu tidak punya izin untuk perintah ini.', flags: 64 });
+        return;
+      }
+      console.error('verify command error:', error);
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({
+          content: 'Terjadi kesalahan saat memproses perintah.',
+          flags: 64,
+        });
+      }
+    }
+  },
+};
+
+module.exports.handleStart = handleStart;
