@@ -718,7 +718,7 @@ router.post('/interview-submit', async (req, res) => {
       type: 'info',
       status: 'INTERVIEW_ANSWERED',
       riskScore: 0,
-      reason: `Interview submitted via web form`,
+      reason: `Interview submitted via web form\n📋 Dashboard: https://vfydsgn.vercel.app/interview-list`,
     });
 
     res.json({ ok: true });
@@ -806,7 +806,8 @@ router.post('/interview-action', async (req, res) => {
       return res.status(404).json({ error: 'User tidak ada di server' });
     }
     
-    const config = await fetchConfig(guild.id);
+    // Get config using getGuildConfig instead of fetchConfig
+    const config = await getGuildConfig(tokenDoc.guildId);
     
     let newStatus;
     let message;
@@ -832,7 +833,7 @@ router.post('/interview-action', async (req, res) => {
           type: 'success',
           status: 'VERIFIED',
           riskScore: 0,
-          reason: `Interview approved by staff. Token: ${token}`,
+          reason: `Interview approved by staff. Token: ${token}\n📋 Dashboard: https://vfydsgn.vercel.app/interview-list`,
         });
         
         // Send DM to user
@@ -869,7 +870,7 @@ Jika ada kendala, hubungi staff server ya!
           type: 'fail',
           status: 'REJECTED',
           riskScore: 100,
-          reason: `Interview rejected by staff. Token: ${token}`,
+          reason: `Interview rejected by staff. Token: ${token}\n📋 Dashboard: https://vfydsgn.vercel.app/interview-list`,
         });
         
         // Send DM to user (if possible, before kick)
@@ -902,7 +903,7 @@ Terima kasih atas minat kamu.
           type: 'info',
           status: 'HOLD',
           riskScore: 50,
-          reason: `Interview held by staff. User requested to re-fill form. Token: ${token}`,
+          reason: `Interview held by staff. User requested to re-fill form. Token: ${token}\n📋 Dashboard: https://vfydsgn.vercel.app/interview-list`,
         });
         
         // Send DM to user
@@ -912,7 +913,7 @@ Terima kasih atas minat kamu.
 
 Staff meminta kamu untuk mengisi ulang form interview. Silakan perbarui jawaban kamu di link interview yang sama.
 
-🔗 **Link Interview:** ${process.env.PUBLIC_FRONTEND_URL || 'http://localhost:3000'}/interview?token=${token}&guild=${encodeURIComponent(guild.name)}
+🔗 **Link Interview:** https://vfydsgn.vercel.app/interview?token=${token}&guild=${encodeURIComponent(guild.name)}
 
 Pastikan jawaban kamu lengkap dan jelas ya!
           `).catch(() => {});
