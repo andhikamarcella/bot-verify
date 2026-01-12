@@ -162,6 +162,11 @@ export default function InterviewPage() {
         setGuildName(data.guildName);
       }
       
+      // Debug: Log answers untuk memastikan muncul
+      console.log('[Interview] Answers data:', data.answers);
+      console.log('[Interview] Answers keys:', data.answers ? Object.keys(data.answers) : 'No answers');
+      console.log('[Interview] Answers length:', data.answers ? Object.keys(data.answers).length : 0);
+      
       // Set status message based on interview status
       switch (data.status) {
         case 'INTERVIEW_REQUIRED':
@@ -403,7 +408,7 @@ export default function InterviewPage() {
               </div>
 
               {/* Interview Answers Display - Always show if answers exist */}
-              {interviewData.answers && (
+              {interviewData.answers && Object.keys(interviewData.answers).length > 0 && (
                 <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
                   <h3 className="text-sm font-semibold text-white mb-4">📝 Jawaban Interview</h3>
                   <div className="space-y-3 text-sm">
@@ -436,7 +441,7 @@ export default function InterviewPage() {
               )}
 
               {/* Staff Action Buttons - Always show if answers exist */}
-              {interviewData.answers && (
+              {interviewData.answers && Object.keys(interviewData.answers).length > 0 && (
                 <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
                   <h3 className="text-sm font-semibold text-white mb-4">⚡ Tindakan Review</h3>
                   <div className="grid grid-cols-3 gap-2">
