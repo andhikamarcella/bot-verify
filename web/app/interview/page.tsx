@@ -68,39 +68,46 @@ export default function InterviewPage() {
   const fetchInterviewStatus = async (tokenValue: string) => {
     try {
       console.log('[Interview] Fetching status for token:', tokenValue);
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:3001'}/api/interview-status?token=${encodeURIComponent(tokenValue)}`;
-      const healthUrl = `${process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:3001'}/health`; // Fixed: remove /api prefix
+      
+      // Production API URL for Vercel deployment
+      const getApiBaseUrl = () => {
+        // Check if we're in production (Vercel)
+        if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+          return 'https://vfy.up.railway.app'; // Railway API server
+        }
+        // Fallback to environment variable or localhost
+        return process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:3001';
+      };
+      
+      const apiUrl = `${getApiBaseUrl()}/api/interview-status?token=${encodeURIComponent(tokenValue)}`;
       
       console.log('[Interview] API URL:', apiUrl);
-      console.log('[Interview] Health URL:', healthUrl);
+      console.log('[Interview] Environment:', process.env.NODE_ENV);
+      console.log('[Interview] Hostname:', typeof window !== 'undefined' ? window.location.hostname : 'server');
       
-      // First test if API server is responding
-      console.log('[Interview] Testing API server health...');
-      const healthRes = await fetch(healthUrl);
-      console.log('[Interview] Health check status:', healthRes.status);
-      
-      if (!healthRes.ok) {
-        setStatus('API server tidak merespons. Hubungi admin.');
-        setLoading(false);
-        return;
-      }
-      
-      const healthData = await healthRes.json();
-      console.log('[Interview] Health check response:', healthData);
+      // Simple fetch without health check for debugging
+      console.log('[Interview] Direct API call...');
       
       // Add timeout to prevent infinite loading
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
       
       const res = await fetch(apiUrl, { signal: controller.signal });
       clearTimeout(timeoutId);
       
       console.log('[Interview] Response status:', res.status);
+      console.log('[Interview] Response headers:', res.headers);
       
       if (!res.ok) {
-        const errorData = await res.json();
-        console.error('[Interview] API Error:', errorData);
-        setStatus(errorData.error || 'Gagal mengambil status interview');
+        const errorText = await res.text();
+        console.error('[Interview] API Error Response:', errorText);
+        
+        try {
+          const errorData = JSON.parse(errorText);
+          setStatus(errorData.error || 'Gagal mengambil status interview');
+        } catch (jsonErr) {
+          setStatus(`API Error (${res.status}): ${errorText}`);
+        }
         setLoading(false);
         return;
       }
@@ -135,9 +142,9 @@ export default function InterviewPage() {
     } catch (error) {
       console.error('[Interview] Fetch error:', error);
       if (error.name === 'AbortError') {
-        setStatus('Timeout - terjadi kesalahan koneksi. Coba refresh halaman.');
+        setStatus('Timeout setelah 5 detik. API server mungkin tidak merespons. Coba refresh halaman.');
       } else {
-        setStatus('Terjadi kesalahan saat mengambil status interview. Token: ' + tokenValue);
+        setStatus(`Terjadi kesalahan: ${error.message}. Token: ${tokenValue}`);
       }
       setLoading(false);
     }
