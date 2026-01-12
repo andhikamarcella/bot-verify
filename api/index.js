@@ -1,13 +1,41 @@
 const express = require('express');
 const cors = require('cors');
-const verifyRoutes = require('./routes/verify');
-const dashboardRoutes = require('./routes/dashboard');
-const guildInfoRoutes = require('./routes/guildInfo');
-const leaderboardRoutes = require('./routes/leaderboard');
+
+// Dynamic require with fallback for deployment environment
+let verifyRoutes, dashboardRoutes, guildInfoRoutes, leaderboardRoutes;
+
+try {
+  verifyRoutes = require('./routes/verify');
+  dashboardRoutes = require('./routes/dashboard');
+  guildInfoRoutes = require('./routes/guildInfo');
+  leaderboardRoutes = require('./routes/leaderboard');
+} catch (error) {
+  console.error('[API] Failed to load routes from relative paths, trying absolute paths...');
+  try {
+    verifyRoutes = require('/app/api/routes/verify');
+    dashboardRoutes = require('/app/api/routes/dashboard');
+    guildInfoRoutes = require('/app/api/routes/guildInfo');
+    leaderboardRoutes = require('/app/api/routes/leaderboard');
+  } catch (absError) {
+    console.error('[API] Failed to load routes from absolute paths:', absError);
+    throw new Error('Cannot load API routes');
+  }
+}
 
 const app = express();
 
-app.use(cors());
+// CORS configuration for production
+app.use(cors({
+  origin: [
+    'http://localhost:3000',           // Local development
+    'https://vfydsgn.vercel.app',       // Production frontend
+    'https://vfy.up.railway.app'        // Railway API (if needed)
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 app.set('trust proxy', true);
 
