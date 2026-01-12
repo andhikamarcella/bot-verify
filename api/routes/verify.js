@@ -728,6 +728,52 @@ router.post('/interview-submit', async (req, res) => {
   }
 });
 
+// GET /api/interviews-all - Fetch all interviews for dashboard
+router.get('/interviews-all', async (req, res) => {
+  try {
+    console.log('[API] Fetching all interviews for dashboard');
+    
+    // Get all tokens with interview answers
+    const { listAllTokens } = tokensModel;
+    const allTokens = await listAllTokens();
+    
+    // Filter tokens that have interview answers and format them
+    const interviews = allTokens
+      .filter(token => token.interviewAnswer && Object.keys(token.interviewAnswer).length > 0)
+      .map(token => {
+        const guild = client.guilds.cache.get(token.guildId);
+        
+        return {
+          token: token.token,
+          userId: token.userId,
+          guildId: token.guildId,
+          guildName: guild?.name || 'Unknown Server',
+          guildIcon: guild ? guild.iconURL({ size: 128, format: 'png', dynamic: true }) : null,
+          status: token.status,
+          answers: token.interviewAnswer,
+          interviewSubmittedAt: token.interviewAnsweredAt,
+          reviewedAt: token.reviewedAt,
+          reviewStatus: token.reviewStatus,
+          reviewNotes: token.reviewNotes
+        };
+      })
+      .sort((a, b) => {
+        // Sort by submission date (newest first)
+        const dateA = new Date(a.interviewSubmittedAt || 0);
+        const dateB = new Date(b.interviewSubmittedAt || 0);
+        return dateB.getTime() - dateA.getTime();
+      });
+    
+    console.log(`[API] Found ${interviews.length} interviews with answers`);
+    
+    res.json(interviews);
+    
+  } catch (error) {
+    console.error('[API] Error fetching all interviews:', error);
+    res.status(500).json({ error: 'Terjadi kesalahan server' });
+  }
+});
+
 // Interview Action Endpoint (Approve/Reject/Hold)
 router.post('/interview-action', async (req, res) => {
   try {
