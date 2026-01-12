@@ -90,6 +90,18 @@ export default function InterviewPage() {
     }
   };
 
+  const getStatusColor = (status?: string) => {
+    switch (status) {
+      case 'INTERVIEW_REQUIRED': return 'text-yellow-400';
+      case 'INTERVIEW_ANSWERED': return 'text-blue-400';
+      case 'PENDING_REVIEW': return 'text-orange-400';
+      case 'VERIFIED': return 'text-green-400';
+      case 'REJECTED': return 'text-red-400';
+      case 'HOLD': return 'text-yellow-400';
+      default: return 'text-slate-400';
+    }
+  };
+
   const fetchInterviewStatus = async (tokenValue: string) => {
     try {
       console.log('[Interview] Fetching status for token:', tokenValue);
@@ -244,8 +256,10 @@ export default function InterviewPage() {
           });
         }
         
-        // Refresh status
-        fetchInterviewStatus(token);
+        // Refresh status untuk update terakhir
+        setTimeout(() => {
+          fetchInterviewStatus(token!);
+        }, 1000);
       } else {
         setStatus(`Gagal melakukan ${action}. Silakan coba lagi.`);
       }
@@ -458,6 +472,38 @@ export default function InterviewPage() {
                   </div>
                 </div>
               )}
+
+              {/* Latest Status Update */}
+              <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+                <h3 className="text-sm font-semibold text-white mb-4">📊 Status Terakhir</h3>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 text-sm">Status:</span>
+                    <span className={`text-sm font-medium ${getStatusColor(interviewData.status)}`}>
+                      {getStatusText(interviewData.status)}
+                    </span>
+                  </div>
+                  
+                  {interviewData.interviewSubmittedAt && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-sm">Dikirim:</span>
+                      <span className="text-slate-300 text-sm">
+                        {new Date(interviewData.interviewSubmittedAt).toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                  )}
+                  
+                  {interviewData.reviewStatus && (
+                    <div className="mt-3 p-3 bg-slate-900/50 rounded-lg border border-slate-600/50">
+                      <p className="text-xs text-cyan-400 font-medium mb-1">Review Status:</p>
+                      <p className="text-xs text-slate-300">{interviewData.reviewStatus}</p>
+                      {interviewData.reason && (
+                        <p className="text-xs text-slate-400 mt-1">{interviewData.reason}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
 
               {/* Interview Form or Actions */}
               {interviewData.status === 'INTERVIEW_REQUIRED' && !showForm && (
