@@ -549,16 +549,31 @@ router.post('/verify', async (req, res) => {
 // GET /api/interview-status?token=xxx
 router.get('/interview-status', async (req, res) => {
   const { token } = req.query || {};
+  console.log('[API] Interview status request for token:', token);
+  
   if (!token) {
+    console.log('[API] Missing token parameter');
     return res.status(400).json({ ok: false, error: 'missing-token' });
   }
 
   try {
     await connectMongo();
+    console.log('[API] Connected to MongoDB, finding token...');
+    
     const record = await findToken(token);
+    console.log('[API] Token record found:', !!record);
+    
     if (!record) {
+      console.log('[API] Token not found in database');
       return res.status(400).json({ ok: false, error: 'invalid-token' });
     }
+
+    console.log('[API] Token record data:', {
+      status: record.status,
+      userId: record.userId,
+      guildId: record.guildId,
+      interviewLink: !!record.interviewLink
+    });
 
     const response = {
       ok: true,
@@ -569,6 +584,7 @@ router.get('/interview-status', async (req, res) => {
       reason: record.reason || null,
     };
 
+    console.log('[API] Sending response:', response);
     res.json(response);
   } catch (err) {
     console.error('[API] Interview status error:', err);
