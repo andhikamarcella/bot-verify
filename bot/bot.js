@@ -332,6 +332,35 @@ async function enforceBlacklistOnMember({ guild, member, reason }) {
   }
 }
 
+// Inline callGroqChat function to avoid module loading issues
+async function inlineCallGroqChat(prompt, language = 'id', systemPrompt = null) {
+  const { callGroq } = require('./commands/ai');
+  const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
+  if (!apiKey) throw new Error('missing-groq-api-key');
+
+  const model = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+  
+  // Build messages array
+  const messages = [];
+  
+  // Add system prompt if provided
+  if (systemPrompt) {
+    messages.push({ role: 'system', content: systemPrompt });
+  } else {
+    // Default system prompt
+    const defaultSystem = language === 'en' 
+      ? 'You are a helpful AI assistant. Be friendly and concise.'
+      : 'Kamu adalah asisten AI yang helpful. Jawab dengan ramah dan singkat.';
+    messages.push({ role: 'system', content: defaultSystem });
+  }
+  
+  // Add user prompt
+  messages.push({ role: 'user', content: String(prompt) });
+
+  const response = await callGroq({ apiKey, model, messages });
+  return response?.content || 'Maaf, aku tidak bisa menjawab saat ini.';
+}
+
 async function handleDMChatAI(message) {
   try {
     // Typing indicator
@@ -405,39 +434,7 @@ Aku siap bantu! 😊`;
     }
 
     // Get AI response with system prompt
-    let aiResponse;
-    try {
-      // Try to get callGroqChat function
-      const aiModule = require('./commands/ai');
-      const callGroqChat = aiModule.callGroqChat;
-      
-      if (!callGroqChat || typeof callGroqChat !== 'function') {
-        throw new Error('callGroqChat function not found in ai module');
-      }
-      
-      aiResponse = await callGroqChat(message.content, 'id', systemPrompt);
-    } catch (importError) {
-      console.error('[DM AI] Import error:', importError);
-      
-      // Fallback: Direct Groq API call
-      try {
-        const { callGroq } = require('./commands/ai');
-        const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
-        if (!apiKey) throw new Error('missing-groq-api-key');
-        
-        const model = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
-        const messages = [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: String(message.content) }
-        ];
-        
-        const response = await callGroq({ apiKey, model, messages });
-        aiResponse = response?.content || 'Maaf, aku tidak bisa menjawab saat ini.';
-      } catch (fallbackError) {
-        console.error('[DM AI] Fallback error:', fallbackError);
-        aiResponse = 'Maaf, terjadi kesalahan dengan AI. Coba lagi nanti ya.';
-      }
-    }
+    const aiResponse = await inlineCallGroqChat(message.content, 'id', systemPrompt);
 
     // Send AI response
     await message.reply({
@@ -570,39 +567,7 @@ Contoh respons:
         console.log(`[Voice Chat] User: ${transcript}`);
 
         // Get AI response with voice context
-        let aiResponse;
-        try {
-          // Try to get callGroqChat function
-          const aiModule = require('./commands/ai');
-          const callGroqChat = aiModule.callGroqChat;
-          
-          if (!callGroqChat || typeof callGroqChat !== 'function') {
-            throw new Error('callGroqChat function not found in ai module');
-          }
-          
-          aiResponse = await callGroqChat(transcript, 'id', voiceSystemPrompt);
-        } catch (importError) {
-          console.error('[Voice Chat] Import error:', importError);
-          
-          // Fallback: Direct Groq API call
-          try {
-            const { callGroq } = require('./commands/ai');
-            const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
-            if (!apiKey) throw new Error('missing-groq-api-key');
-            
-            const model = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
-            const messages = [
-              { role: 'system', content: voiceSystemPrompt },
-              { role: 'user', content: String(transcript) }
-            ];
-            
-            const response = await callGroq({ apiKey, model, messages });
-            aiResponse = response?.content || 'Maaf, aku tidak bisa menjawab saat ini.';
-          } catch (fallbackError) {
-            console.error('[Voice Chat] Fallback error:', fallbackError);
-            aiResponse = 'Maaf, terjadi kesalahan dengan AI.';
-          }
-        }
+        const aiResponse = await inlineCallGroqChat(transcript, 'id', voiceSystemPrompt);
         console.log(`[Voice Chat] AI: ${aiResponse}`);
 
         // Speak AI response
