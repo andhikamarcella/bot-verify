@@ -46,7 +46,6 @@ export default function InterviewPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [showCopyNotification, setShowCopyNotification] = useState(false);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -214,68 +213,6 @@ export default function InterviewPage() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleInterviewAction = async (action: 'approve' | 'reject' | 'hold') => {
-    if (!token) return;
-    
-    setActionLoading(action);
-    
-    try {
-      const getApiBaseUrl = () => {
-        if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
-          return 'https://vfy.up.railway.app';
-        }
-        return (typeof window !== 'undefined' && (window as any).process?.env?.NEXT_PUBLIC_API_BASE) || 'http://localhost:3001';
-      };
-      
-      const response = await fetch(`${getApiBaseUrl()}/api/interview-action`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          token,
-          action
-        }),
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        
-        if (action === 'approve') {
-          setStatus('✅ Aplikasi disetujui! User mendapatkan role dan dapat join Discord.');
-          // Open Discord invite link
-          window.open('https://discord.gg/gECYdzVz2j', '_blank');
-        } else if (action === 'reject') {
-          setStatus('❌ Aplikasi ditolak. User akan dikeluarkan dari server.');
-        } else if (action === 'hold') {
-          setStatus('⏸️ Aplikasi ditahan. User diminta mengisi ulang form.');
-          // Reset form untuk user
-          setShowForm(true);
-          setFormData({
-            name: '',
-            age: '',
-            reason: '',
-            experience: '',
-            availability: '',
-            expectations: ''
-          });
-        }
-        
-        // Refresh status untuk update terakhir
-        setTimeout(() => {
-          fetchInterviewStatus(token!);
-        }, 1000);
-      } else {
-        setStatus(`Gagal melakukan ${action}. Silakan coba lagi.`);
-      }
-    } catch (error) {
-      console.error('[Interview] Action error:', error);
-      setStatus(`Terjadi kesalahan saat melakukan ${action}.`);
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const submitInterview = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -440,44 +377,6 @@ export default function InterviewPage() {
                 </div>
               )}
 
-              {/* Staff Action Buttons - Always show if answers exist */}
-              {interviewData.answers && Object.keys(interviewData.answers).length > 0 && (
-                <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
-                  <h3 className="text-sm font-semibold text-white mb-4">⚡ Tindakan Review</h3>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      onClick={() => handleInterviewAction('approve')}
-                      disabled={actionLoading === 'approve'}
-                      className="bg-green-500 hover:bg-green-600 disabled:bg-slate-600 text-white font-medium py-2 px-3 rounded-lg text-center transition-all duration-200 text-sm"
-                    >
-                      {actionLoading === 'approve' ? '⏳' : '✅ Approve'}
-                    </button>
-                    
-                    <button
-                      onClick={() => handleInterviewAction('reject')}
-                      disabled={actionLoading === 'reject'}
-                      className="bg-red-500 hover:bg-red-600 disabled:bg-slate-600 text-white font-medium py-2 px-3 rounded-lg text-center transition-all duration-200 text-sm"
-                    >
-                      {actionLoading === 'reject' ? '⏳' : '❌ Reject'}
-                    </button>
-                    
-                    <button
-                      onClick={() => handleInterviewAction('hold')}
-                      disabled={actionLoading === 'hold'}
-                      className="bg-yellow-500 hover:bg-yellow-600 disabled:bg-slate-600 text-white font-medium py-2 px-3 rounded-lg text-center transition-all duration-200 text-sm"
-                    >
-                      {actionLoading === 'hold' ? '⏳' : '⏸️ Hold'}
-                    </button>
-                  </div>
-                  
-                  <div className="mt-3 text-xs text-slate-400">
-                    <p>• <strong>Approve:</strong> Kasih role & Discord invite</p>
-                    <p>• <strong>Reject:</strong> Kick dari server</p>
-                    <p>• <strong>Hold:</strong> Suruh isi ulang form</p>
-                  </div>
-                </div>
-              )}
-
               {/* Latest Status Update */}
               <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
                 <h3 className="text-sm font-semibold text-white mb-4">📊 Status Terakhir</h3>
@@ -509,6 +408,24 @@ export default function InterviewPage() {
                   )}
                 </div>
               </div>
+
+              {/* Staff Dashboard Link */}
+              {interviewData.answers && Object.keys(interviewData.answers).length > 0 && (
+                <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+                  <h3 className="text-sm font-semibold text-white mb-4">👨‍💼 Staff Dashboard</h3>
+                  <p className="text-xs text-slate-400 mb-3">
+                    Untuk melakukan tindakan review (approve/reject/hold), buka dashboard interview:
+                  </p>
+                  <a
+                    href="https://vfydsgn.vercel.app/interview-list"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block w-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-medium py-3 px-4 rounded-xl text-center transition-all duration-200 shadow-[0_0_15px_rgba(34,211,238,0.3)]"
+                  >
+                    📋 Buka Interview Dashboard
+                  </a>
+                </div>
+              )}
 
               {/* Interview Form or Actions */}
               {interviewData.status === 'INTERVIEW_REQUIRED' && !showForm && (
