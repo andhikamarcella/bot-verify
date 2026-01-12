@@ -71,19 +71,26 @@ export default function InterviewPage() {
       const apiUrl = `${process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:3001'}/api/interview-status?token=${encodeURIComponent(tokenValue)}`;
       console.log('[Interview] API URL:', apiUrl);
       
-      const res = await fetch(apiUrl);
+      // Add timeout to prevent infinite loading
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      const res = await fetch(apiUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      
       console.log('[Interview] Response status:', res.status);
+      
+      if (!res.ok) {
+        const errorData = await res.json();
+        console.error('[Interview] API Error:', errorData);
+        setStatus(errorData.error || 'Gagal mengambil status interview');
+        setLoading(false);
+        return;
+      }
       
       const data: InterviewStatusResponse = await res.json();
       console.log('[Interview] Response data:', data);
       
-      if (!res.ok) {
-        console.error('[Interview] API Error:', data.error);
-        setStatus(data.error || 'Gagal mengambil status interview');
-        setLoading(false);
-        return;
-      }
-
       setInterviewData(data);
       
       // Set status message based on interview status
@@ -106,9 +113,15 @@ export default function InterviewPage() {
         default:
           setStatus('Status tidak diketahui.');
       }
+      
+      setLoading(false);
     } catch (error) {
       console.error('[Interview] Fetch error:', error);
-      setStatus('Terjadi kesalahan saat mengambil status interview. Token: ' + tokenValue);
+      if (error.name === 'AbortError') {
+        setStatus('Timeout - terjadi kesalahan koneksi. Coba refresh halaman.');
+      } else {
+        setStatus('Terjadi kesalahan saat mengambil status interview. Token: ' + tokenValue);
+      }
       setLoading(false);
     }
   };
