@@ -428,22 +428,30 @@ export default function InterviewPage() {
               )}
 
               {/* Interview Form or Actions */}
-              {interviewData.status === 'INTERVIEW_REQUIRED' && !showForm && (
+              {(interviewData.status === 'INTERVIEW_REQUIRED' || interviewData.status === 'HOLD') && !showForm && (
                 <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
-                  <h3 className="text-sm font-semibold text-white mb-3">Form Interview</h3>
+                  <h3 className="text-sm font-semibold text-white mb-3">
+                    {interviewData.status === 'HOLD' ? 'Update Form Interview' : 'Form Interview'}
+                  </h3>
                   <div className="space-y-3">
                     <button
-                      onClick={() => setShowForm(true)}
+                      onClick={() => {
+                        setShowForm(true);
+                        // Pre-fill form with existing answers if available
+                        if (interviewData.answers) {
+                          setFormData({
+                            name: interviewData.answers.name || '',
+                            age: interviewData.answers.age || '',
+                            reason: interviewData.answers.reason || '',
+                            experience: interviewData.answers.experience || '',
+                            availability: interviewData.answers.availability || '',
+                            expectations: interviewData.answers.expectations || ''
+                          });
+                        }
+                      }}
                       className="block w-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-medium py-3 px-4 rounded-xl text-center transition-all duration-200 shadow-[0_0_15px_rgba(34,211,238,0.3)]"
                     >
-                      Buka Form Interview
-                    </button>
-                    
-                    <button
-                      onClick={() => copyToClipboard(window.location.href)}
-                      className="w-full bg-slate-700 hover:bg-slate-600 text-white font-medium py-3 px-4 rounded-xl text-center transition-all duration-200 flex items-center justify-center gap-2"
-                    >
-                      📋 Salin Link Interview
+                      {interviewData.status === 'HOLD' ? '📝 Update Jawaban' : 'Buka Form Interview'}
                     </button>
                   </div>
                 </div>
@@ -570,22 +578,6 @@ export default function InterviewPage() {
                   >
                     🎮 Join Discord Server
                   </a>
-                </div>
-              )}
-
-              {/* Hold Status - Re-fill Form */}
-              {interviewData.status === 'HOLD' && (
-                <div className="bg-yellow-500/10 p-4 rounded-xl border border-yellow-500/20">
-                  <h3 className="text-sm font-semibold text-white mb-3">⏸️ Aplikasi Ditahan</h3>
-                  <p className="text-xs text-yellow-300 mb-4">
-                    Staff meminta kamu untuk mengisi ulang form interview. Silakan perbarui jawaban kamu.
-                  </p>
-                  <button
-                    onClick={() => setShowForm(true)}
-                    className="block w-full bg-yellow-500 hover:bg-yellow-600 text-slate-950 font-medium py-3 px-4 rounded-xl text-center transition-all duration-200 shadow-[0_0_15px_rgba(234,179,8,0.3)]"
-                  >
-                    📝 Isi Ulang Form
-                  </button>
                 </div>
               )}
 
