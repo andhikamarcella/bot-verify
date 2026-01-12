@@ -698,7 +698,7 @@ router.post('/interview-submit', async (req, res) => {
   try {
     await connectMongo();
     const record = await findToken(token);
-    if (!record || record.status !== 'INTERVIEW_REQUIRED') {
+    if (!record || (record.status !== 'INTERVIEW_REQUIRED' && record.status !== 'HOLD')) {
       return res.status(400).json({ ok: false, error: 'invalid-token-or-status' });
     }
 
@@ -718,7 +718,7 @@ router.post('/interview-submit', async (req, res) => {
       type: 'info',
       status: 'INTERVIEW_ANSWERED',
       riskScore: 0,
-      reason: `Interview submitted via web form\n📋 Dashboard: https://vfydsgn.vercel.app/interview-list`,
+      reason: `Interview ${record.status === 'HOLD' ? 'updated' : 'submitted'} via web form\n📋 Dashboard: https://vfydsgn.vercel.app/interview-list`,
     });
 
     res.json({ ok: true });
