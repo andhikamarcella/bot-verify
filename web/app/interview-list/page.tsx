@@ -1,6 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+
+// Simple XOR encryption for client-side
+const XOR_KEY = "vfy2024secure";
+
+const encrypt = (text: string): string => {
+  return btoa(text.split('').map(char => 
+    String.fromCharCode(char.charCodeAt(0) ^ XOR_KEY.charCodeAt(0))
+  ).join(''));
+};
+
+const decrypt = (encryptedText: string): string => {
+  try {
+    return atob(encryptedText).split('').map(char => 
+      String.fromCharCode(char.charCodeAt(0) ^ XOR_KEY.charCodeAt(0))
+    ).join('');
+  } catch {
+    return '';
+  }
+};
 
 interface InterviewData {
   token: string;
@@ -21,6 +41,136 @@ interface InterviewData {
 }
 
 export default function InterviewDashboard() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+
+  // Check if already authenticated
+  useEffect(() => {
+    const auth = localStorage.getItem('interview_auth');
+    if (auth) {
+      const decrypted = decrypt(auth);
+      if (decrypted === 'dikalfe0032:true') {
+        setIsAuthenticated(true);
+      } else {
+        localStorage.removeItem('interview_auth');
+      }
+    }
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    // Simple validation with encrypted credentials
+    const validUsername = "dikalfe0032";
+    const validPassword = "and30000";
+
+    if (username === validUsername && password === validPassword) {
+      // Store encrypted auth
+      const encryptedAuth = encrypt(`${username}:true`);
+      localStorage.setItem('interview_auth', encryptedAuth);
+      setIsAuthenticated(true);
+    } else {
+      setError("Username atau password salah!");
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('interview_auth');
+    setIsAuthenticated(false);
+    setUsername("");
+    setPassword("");
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <main className="min-h-screen bg-[#050505] text-slate-200 font-sans flex items-center justify-center p-4">
+        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
+          <div className="absolute top-[-10%] left-[20%] w-[500px] h-[500px] bg-cyan-500/10 rounded-full blur-[100px]" />
+          <div className="absolute bottom-[-10%] right-[20%] w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[100px]" />
+        </div>
+
+        <div className="relative z-10 w-full max-w-md">
+          <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-2xl p-8">
+            {/* Header */}
+            <div className="text-center mb-8">
+              <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-[#5865F2] to-[#4752C4] flex items-center justify-center mx-auto mb-4">
+                <svg className="w-10 h-10 text-white" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515a.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0a12.64 12.64 0 0 0-.617-1.25a.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057a19.9 19.9 0 0 0 5.993 3.03a.078.078 0 0 0 .084-.028a14.09 14.09 0 0 0 1.226-1.994a.076.076 0 0 0-.041-.106a13.107 13.107 0 0 1-1.872-.892a.077.077 0 0 1-.008-.128a10.2 10.2 0 0 0 .372-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127a12.299 12.299 0 0 1-1.873.892a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028a19.839 19.839 0 0 0 6.002-3.03a.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.956-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.955-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.946 2.418-2.157 2.418z"/>
+                </svg>
+              </div>
+              <h1 className="text-2xl font-bold text-white mb-2">Admin Login</h1>
+              <p className="text-slate-400 text-sm">Interview Dashboard</p>
+            </div>
+
+            {/* Login Form */}
+            <form onSubmit={handleLogin} className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-transparent transition-all duration-200"
+                  placeholder="Masukkan username"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-transparent transition-all duration-200"
+                  placeholder="Masukkan password"
+                  required
+                />
+              </div>
+
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+                  <p className="text-red-400 text-sm">{error}</p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-cyan-500 hover:bg-cyan-600 disabled:bg-slate-600 text-slate-950 font-medium py-3 px-4 rounded-xl text-center transition-all duration-200 shadow-[0_0_15px_rgba(34,211,238,0.3)] disabled:shadow-none"
+              >
+                {loading ? '⏳ Login...' : '🔐 Login'}
+              </button>
+            </form>
+
+            {/* Footer */}
+            <div className="mt-8 pt-6 border-t border-slate-700/50 text-center">
+              <p className="text-xs text-slate-500">
+                Halaman ini dilindungi. Akses tidak sah akan dicatat.
+              </p>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // Dashboard content
+  return <InterviewDashboardContent onLogout={handleLogout} />;
+}
+
+function InterviewDashboardContent({ onLogout }: { onLogout: () => void }) {
   const [interviews, setInterviews] = useState<InterviewData[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
