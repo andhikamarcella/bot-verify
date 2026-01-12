@@ -388,8 +388,8 @@ export default function InterviewPage() {
                 )}
               </div>
 
-              {/* Interview Answers Display */}
-              {interviewData.answers && (interviewData.status === 'INTERVIEW_ANSWERED' || interviewData.status === 'PENDING_REVIEW') && (
+              {/* Interview Answers Display - Always show if answers exist */}
+              {interviewData.answers && (
                 <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
                   <h3 className="text-sm font-semibold text-white mb-4">📝 Jawaban Interview</h3>
                   <div className="space-y-3 text-sm">
@@ -421,10 +421,10 @@ export default function InterviewPage() {
                 </div>
               )}
 
-              {/* Staff Action Buttons */}
-              {interviewData.isStaff && (interviewData.status === 'INTERVIEW_ANSWERED' || interviewData.status === 'PENDING_REVIEW') && (
+              {/* Staff Action Buttons - Always show if answers exist */}
+              {interviewData.answers && (
                 <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
-                  <h3 className="text-sm font-semibold text-white mb-4">⚡ Tindakan Staff</h3>
+                  <h3 className="text-sm font-semibold text-white mb-4">⚡ Tindakan Review</h3>
                   <div className="grid grid-cols-3 gap-2">
                     <button
                       onClick={() => handleInterviewAction('approve')}
@@ -452,7 +452,7 @@ export default function InterviewPage() {
                   </div>
                   
                   <div className="mt-3 text-xs text-slate-400">
-                    <p>• <strong>Approve:</strong> Kasih role & buka Discord invite</p>
+                    <p>• <strong>Approve:</strong> Kasih role & Discord invite</p>
                     <p>• <strong>Reject:</strong> Kick dari server</p>
                     <p>• <strong>Hold:</strong> Suruh isi ulang form</p>
                   </div>
