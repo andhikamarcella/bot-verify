@@ -69,7 +69,24 @@ export default function InterviewPage() {
     try {
       console.log('[Interview] Fetching status for token:', tokenValue);
       const apiUrl = `${process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:3001'}/api/interview-status?token=${encodeURIComponent(tokenValue)}`;
+      const healthUrl = `${process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:3001'}/health`; // Fixed: remove /api prefix
+      
       console.log('[Interview] API URL:', apiUrl);
+      console.log('[Interview] Health URL:', healthUrl);
+      
+      // First test if API server is responding
+      console.log('[Interview] Testing API server health...');
+      const healthRes = await fetch(healthUrl);
+      console.log('[Interview] Health check status:', healthRes.status);
+      
+      if (!healthRes.ok) {
+        setStatus('API server tidak merespons. Hubungi admin.');
+        setLoading(false);
+        return;
+      }
+      
+      const healthData = await healthRes.json();
+      console.log('[Interview] Health check response:', healthData);
       
       // Add timeout to prevent infinite loading
       const controller = new AbortController();
