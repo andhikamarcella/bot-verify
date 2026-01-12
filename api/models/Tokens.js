@@ -159,6 +159,11 @@ async function listDmMessagesForGuild(guildId, {
     .toArray();
 }
 
+async function listAllTokens() {
+  const collection = await getCollection();
+  return collection.find({}).sort({ createdAt: -1 }).toArray();
+}
+
 module.exports = {
   createTokenDocument,
   findToken,
@@ -172,4 +177,5 @@ module.exports = {
   listDmMessagesForUser,
   listDmMessagesForGuild,
   listByStatuses,
+  listAllTokens,
 };
