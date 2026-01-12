@@ -67,10 +67,18 @@ export default function InterviewPage() {
 
   const fetchInterviewStatus = async (tokenValue: string) => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:3001'}/api/interview-status?token=${encodeURIComponent(tokenValue)}`);
+      console.log('[Interview] Fetching status for token:', tokenValue);
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:3001'}/api/interview-status?token=${encodeURIComponent(tokenValue)}`;
+      console.log('[Interview] API URL:', apiUrl);
+      
+      const res = await fetch(apiUrl);
+      console.log('[Interview] Response status:', res.status);
+      
       const data: InterviewStatusResponse = await res.json();
+      console.log('[Interview] Response data:', data);
       
       if (!res.ok) {
+        console.error('[Interview] API Error:', data.error);
         setStatus(data.error || 'Gagal mengambil status interview');
         setLoading(false);
         return;
@@ -98,10 +106,9 @@ export default function InterviewPage() {
         default:
           setStatus('Status tidak diketahui.');
       }
-    } catch (err) {
-      console.error('Failed to fetch interview status:', err);
-      setStatus('Terjadi kesalahan saat mengambil status interview.');
-    } finally {
+    } catch (error) {
+      console.error('[Interview] Fetch error:', error);
+      setStatus('Terjadi kesalahan saat mengambil status interview. Token: ' + tokenValue);
       setLoading(false);
     }
   };
