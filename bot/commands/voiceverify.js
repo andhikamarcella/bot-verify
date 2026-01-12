@@ -485,9 +485,11 @@ module.exports = {
           // Create a proper verification token for interview
           const { createTokenDocument } = require('../../api/models/Tokens');
           const crypto = require('crypto');
-          const interviewToken = crypto.randomBytes(32).toString('hex');
+          const interviewToken = crypto.randomUUID(); // Use same format as web verification
           
           try {
+            console.log('[Voice Verify] Creating interview token for user:', interaction.user.id);
+            
             await createTokenDocument({
               token: interviewToken,
               userId: interaction.user.id,
@@ -499,7 +501,10 @@ module.exports = {
               reviewedAt: new Date(),
               reviewDecision: 'INTERVIEW',
               reviewNotes: 'Voice verification passed, interview required',
+              createdAt: new Date(),
             });
+            
+            console.log('[Voice Verify] Interview token created successfully:', interviewToken);
             
             const interviewLink = `${baseUrl}/interview?token=${interviewToken}&guild=${encodeURIComponent(guild.name)}`;
             
@@ -513,6 +518,8 @@ module.exports = {
                 'Link ini akan membawa kamu ke halaman interview untuk kelengkapan data.',
               ].join('\n')
             );
+            
+            console.log('[Voice Verify] Interview link sent to user via DM');
           } catch (dmErr) {
             console.error('[VoiceVerify] Failed to create interview token or send DM:', dmErr);
           }
