@@ -483,7 +483,7 @@ module.exports = {
           const baseUrl = process.env.PUBLIC_FRONTEND_URL || process.env.FRONTEND_BASE || 'http://localhost:3000';
           
           // Create a proper verification token for interview
-          const { createTokenDocument } = require('../models/Tokens');
+          const { createTokenDocument } = require('../../api/models/Tokens');
           const crypto = require('crypto');
           const interviewToken = crypto.randomBytes(32).toString('hex');
           
