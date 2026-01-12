@@ -4,13 +4,32 @@ const {
   PermissionFlagsBits,
 } = require('discord.js');
 
+// Dynamic require with fallback for deployment environment
+let tokensModel;
+try {
+  tokensModel = require('../../api/models/Tokens');
+} catch (error) {
+  console.error('[App] Failed to load Tokens model from relative path, trying absolute path...');
+  try {
+    tokensModel = require('/app/api/models/Tokens');
+  } catch (absError) {
+    console.error('[App] Failed to load Tokens model from absolute path, trying alternative...');
+    try {
+      tokensModel = require('../models/Tokens');
+    } catch (altError) {
+      console.error('[App] All attempts to load Tokens model failed:', altError);
+      throw new Error('Cannot load Tokens model');
+    }
+  }
+}
+
 const {
   findToken,
   listByStatuses,
   setTokenStatus,
   listDmMessagesForGuild,
   clearTokenDmFields,
-} = require('../../api/models/Tokens');
+} = tokensModel;
 const { upsertUserProfile } = require('../../api/models/Users');
 const { fetchConfig } = require('../utils/guildConfig');
 const { sendVerificationLog } = require('../utils/logging');
