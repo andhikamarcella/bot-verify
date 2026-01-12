@@ -315,6 +315,36 @@ async function runTool(interaction, toolCall) {
   throw new Error('tool-not-implemented');
 }
 
+async function callGroqChat(prompt, language = 'id', systemPrompt = null) {
+  const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
+  if (!apiKey) throw new Error('missing-groq-api-key');
+
+  const model = process.env.GROQ_MODEL || DEFAULT_MODEL;
+  
+  // Build messages array
+  const messages = [];
+  
+  // Add system prompt if provided
+  if (systemPrompt) {
+    messages.push({ role: 'system', content: systemPrompt });
+  } else {
+    // Default system prompt
+    const defaultSystem = language === 'en' 
+      ? 'You are a helpful AI assistant. Be friendly and concise.'
+      : 'Kamu adalah asisten AI yang helpful. Jawab dengan ramah dan singkat.';
+    messages.push({ role: 'system', content: defaultSystem });
+  }
+  
+  // Add user prompt
+  messages.push({ role: 'user', content: String(prompt) });
+
+  const response = await callGroq({ apiKey, model, messages });
+  return response?.content || 'Maaf, aku tidak bisa menjawab saat ini.';
+}
+
+// Export the callGroqChat function separately for use in other files
+module.exports.callGroqChat = callGroqChat;
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('ai')
@@ -329,17 +359,17 @@ module.exports = {
     .addBooleanOption((opt) =>
       opt
         .setName('public')
-        .setDescription('Tampilkan jawaban ke semua orang (default: private)')
+        .setDescription('Tampilkan ke semua orang (default: private)')
         .setRequired(false)
     )
     .addBooleanOption((opt) =>
       opt
         .setName('execute')
-        .setDescription('Izinkan AI menjalankan aksi aman (STAFF ONLY)')
+        .setDescription('Izinkan AI menjalankan aksi (STAFF ONLY)')
         .setRequired(false)
     ),
 
-  async execute(interaction) {
+  async execute(interaction, client) {
     try {
       ensureMemberOrHigher(interaction);
     } catch (_) {
