@@ -461,11 +461,8 @@ module.exports = {
         console.log(`[VoiceVerify] Transcript: "${transcript}" => "${answer}" (expected: "${code}")`);
 
         if (answer === code) {
-          const botMember = guild.members.me || (await guild.members.fetchMe().catch(() => null));
-          if (!botMember?.permissions?.has?.('ManageRoles')) {
-            throw new Error('bot-missing-manage-roles');
-          }
-          await freshMember.roles.add(memberRoleId, 'voiceverify');
+          // Voice verification successful - create interview token instead of giving role
+          console.log('[VoiceVerify] Voice verification passed, creating interview token...');
 
           await sendVerificationLog({
             client: interaction.client,
