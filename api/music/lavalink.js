@@ -91,16 +91,36 @@ async function initializeLavalink(client) {
     // Store the client for emergency use
     discordClient = client;
     
+    // Try multiple node configurations for better compatibility
+    const nodeConfigs = [
+      {
+        // Primary configuration (Railway)
+        identifier: 'main',
+        host: LAVALINK_CONFIG.host,
+        port: LAVALINK_CONFIG.port,
+        password: LAVALINK_CONFIG.password,
+        secure: LAVALINK_CONFIG.secure,
+      },
+      {
+        // Fallback configuration (try without secure)
+        identifier: 'fallback',
+        host: LAVALINK_CONFIG.host,
+        port: LAVALINK_CONFIG.port,
+        password: LAVALINK_CONFIG.password,
+        secure: false,
+      },
+      {
+        // Alternative port fallback
+        identifier: 'alt-port',
+        host: LAVALINK_CONFIG.host,
+        port: 80, // Try HTTP port
+        password: LAVALINK_CONFIG.password,
+        secure: false,
+      }
+    ];
+    
     lavalinkManager = new Manager({
-      nodes: [
-        {
-          identifier: 'main',
-          host: LAVALINK_CONFIG.host,
-          port: LAVALINK_CONFIG.port,
-          password: LAVALINK_CONFIG.password,
-          secure: LAVALINK_CONFIG.secure,
-        },
-      ],
+      nodes: nodeConfigs,
       send: (payload) => {
         // Send the payload to Discord gateway
         if (client.shard) {
@@ -113,8 +133,10 @@ async function initializeLavalink(client) {
       clientID: client.user.id,
       plugins: [],
       autoPlay: false,
-      retryDelay: 3000,
-      retryAmount: 3,
+      retryDelay: 5000, // Increased retry delay
+      retryAmount: 5, // Increased retry attempts
+      autoSkip: true,
+      volume: 100,
     });
 
     // Event listeners
@@ -193,9 +215,10 @@ async function initializeLavalink(client) {
     const maxAttempts = 10;
     
     while (attempts < maxAttempts) {
-      const node = lavalinkManager.nodes.get('main');
-      if (node && node.connected) {
-        console.log('[Lavalink] Node connected successfully!');
+      // Try to find any connected node
+      const connectedNode = lavalinkManager.nodes.find(node => node.connected);
+      if (connectedNode) {
+        console.log(`[Lavalink] Node ${connectedNode.identifier} connected successfully!`);
         return lavalinkManager;
       }
       
@@ -204,6 +227,8 @@ async function initializeLavalink(client) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
+    // If no node connected, try to check what nodes exist
+    console.log('[Lavalink] Available nodes:', lavalinkManager.nodes.map(n => ({ id: n.identifier, connected: n.connected })));
     throw new Error('Node failed to connect after multiple attempts');
 
   } catch (error) {
@@ -241,16 +266,17 @@ async function searchYouTube(query) {
       }
     }
 
-    const node = lavalinkManager.nodes.get('main');
-    console.log('[Lavalink] Node exists:', !!node);
-    console.log('[Lavalink] Node connected:', node?.connected);
+    // Find any connected node
+    const connectedNode = lavalinkManager.nodes.find(node => node.connected);
+    console.log('[Lavalink] Connected node:', connectedNode?.identifier || 'none');
     
-    if (!node || !node.connected) {
+    if (!connectedNode) {
       console.error('[Lavalink] No Lavalink node available or not connected');
+      console.log('[Lavalink] Available nodes:', lavalinkManager.nodes.map(n => ({ id: n.identifier, connected: n.connected })));
       throw new Error('No Lavalink node available');
     }
 
-    const results = await node.search(query, 'youtube');
+    const results = await connectedNode.search(query, 'youtube');
     console.log('[Lavalink] Search results:', results?.tracks?.length || 0);
     
     if (!results || !results.tracks || results.tracks.length === 0) {
