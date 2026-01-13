@@ -4,14 +4,14 @@
 # Server settings
 server:
   port: 2333
-  address: localhost
-  http2:
-    enabled: false
 
-# Lavalink server password
 lavalink:
   server:
-    password: youshallnotpass
+    password: "youshallnotpass"
+
+spring:
+  main:
+    banner-mode: off
 
 # YouTube source plugin configuration
 plugins:
