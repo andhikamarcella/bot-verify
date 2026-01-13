@@ -78,12 +78,16 @@ const musicQueue = new MusicQueue();
 
 // Lavalink manager instance
 let lavalinkManager = null;
+let discordClient = null;
 
 // Initialize Lavalink
 async function initializeLavalink(client) {
   try {
     console.log('[Lavalink] Starting initialization...');
     console.log('[Lavalink] Config:', LAVALINK_CONFIG);
+    
+    // Store the client for emergency use
+    discordClient = client;
     
     lavalinkManager = new Manager({
       nodes: [
@@ -95,12 +99,13 @@ async function initializeLavalink(client) {
           secure: LAVALINK_CONFIG.secure,
         },
       ],
+      send: (payload) => {
+        const guild = client.guilds.cache.get(payload.d.guild_id);
+        if (guild) guild.shard.send(payload);
+      },
       clientID: client.user.id,
-      // Auto-play YouTube
       plugins: [],
-      // Default search engine
       autoPlay: false,
-      // Use default Spotify and YouTube
       retryDelay: 3000,
       retryAmount: 3,
     });
@@ -172,7 +177,7 @@ async function initializeLavalink(client) {
 
     // Initialize the manager
     console.log('[Lavalink] Initializing manager...');
-    await lavalinkManager.init(client.user.id);
+    lavalinkManager.init(client.user.id);
     console.log('[Lavalink] Manager initialized successfully!');
 
     // Wait for node connection
@@ -208,7 +213,25 @@ async function searchYouTube(query) {
     
     if (!lavalinkManager) {
       console.error('[Lavalink] Manager not initialized, attempting to initialize...');
-      throw new Error('Lavalink manager not initialized');
+      try {
+        // Try to use the stored client first, otherwise get it from discordClient
+        let client = discordClient;
+        if (!client) {
+          const { getClient } = require('../bot/discordClient');
+          client = getClient();
+        }
+        
+        if (client && client.user) {
+          console.log('[Lavalink] Attempting emergency initialization...');
+          await initializeLavalink(client);
+          console.log('[Lavalink] Emergency initialization successful!');
+        } else {
+          throw new Error('Discord client not available');
+        }
+      } catch (initError) {
+        console.error('[Lavalink] Emergency initialization failed:', initError);
+        throw new Error('Lavalink manager not initialized and emergency initialization failed');
+      }
     }
 
     const node = lavalinkManager.nodes.get('main');
