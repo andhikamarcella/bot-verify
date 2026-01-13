@@ -94,7 +94,7 @@ async function initializeLavalink(client) {
     // Try multiple node configurations for better compatibility
     const nodeConfigs = [
       {
-        // Primary configuration (Railway)
+        // Primary configuration (Railway HTTPS)
         identifier: 'main',
         host: LAVALINK_CONFIG.host,
         port: LAVALINK_CONFIG.port,
@@ -110,10 +110,26 @@ async function initializeLavalink(client) {
         secure: false,
       },
       {
-        // Alternative port fallback
+        // Alternative port fallback (HTTP)
         identifier: 'alt-port',
         host: LAVALINK_CONFIG.host,
-        port: 80, // Try HTTP port
+        port: 80,
+        password: LAVALINK_CONFIG.password,
+        secure: false,
+      },
+      {
+        // Try localhost for development
+        identifier: 'localhost',
+        host: 'localhost',
+        port: 2333,
+        password: 'youshallnotpass',
+        secure: false,
+      },
+      {
+        // Try common Lavalink ports
+        identifier: 'common-port',
+        host: LAVALINK_CONFIG.host,
+        port: 2333,
         password: LAVALINK_CONFIG.password,
         secure: false,
       }
@@ -212,7 +228,7 @@ async function initializeLavalink(client) {
     // Wait for node connection
     console.log('[Lavalink] Waiting for node connection...');
     let attempts = 0;
-    const maxAttempts = 10;
+    const maxAttempts = 15; // Increased attempts
     
     while (attempts < maxAttempts) {
       // Try to find any connected node
@@ -224,12 +240,14 @@ async function initializeLavalink(client) {
       
       attempts++;
       console.log(`[Lavalink] Waiting for connection... (${attempts}/${maxAttempts})`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Increased wait time
     }
     
-    // If no node connected, try to check what nodes exist
+    // If no node connected, don't throw error - just log and continue without music
     console.log('[Lavalink] Available nodes:', lavalinkManager.nodes.map(n => ({ id: n.identifier, connected: n.connected })));
-    throw new Error('Node failed to connect after multiple attempts');
+    console.warn('[Lavalink] No Lavalink nodes connected. Music functionality will be disabled.');
+    // Don't throw error - return null to indicate no music functionality
+    return null;
 
   } catch (error) {
     console.error('[Lavalink] Failed to initialize:', error);
@@ -334,6 +352,14 @@ const musicCommands = {
   async play(interaction) {
     console.log('[MusicCommands] Play function called');
     try {
+      // Check if Lavalink is available
+      if (!lavalinkManager) {
+        return await interaction.reply({
+          content: '❌ Music functionality is currently unavailable. Lavalink server is not connected.',
+          ephemeral: true,
+        });
+      }
+
       const query = interaction.options.getString('query');
       const { member, guild } = interaction;
 
@@ -392,9 +418,17 @@ const musicCommands = {
 
   async skip(interaction) {
     try {
+      // Check if Lavalink is available
+      if (!lavalinkManager) {
+        return await interaction.reply({
+          content: '❌ Music functionality is currently unavailable. Lavalink server is not connected.',
+          ephemeral: true,
+        });
+      }
+
       const { guild } = interaction;
 
-      if (!lavalinkManager || !lavalinkManager.players.has(guild.id)) {
+      if (!lavalinkManager.players.has(guild.id)) {
         return await interaction.reply({
           content: '❌ No music is currently playing!',
           ephemeral: true,
@@ -428,9 +462,17 @@ const musicCommands = {
 
   async stop(interaction) {
     try {
+      // Check if Lavalink is available
+      if (!lavalinkManager) {
+        return await interaction.reply({
+          content: '❌ Music functionality is currently unavailable. Lavalink server is not connected.',
+          ephemeral: true,
+        });
+      }
+
       const { guild } = interaction;
 
-      if (!lavalinkManager || !lavalinkManager.players.has(guild.id)) {
+      if (!lavalinkManager.players.has(guild.id)) {
         return await interaction.reply({
           content: '❌ No music is currently playing!',
           ephemeral: true,
