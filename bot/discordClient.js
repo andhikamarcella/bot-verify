@@ -15,4 +15,10 @@ const client = new Client({
 
 client.commands = new Collection();
 
+// Export a function to get the client instance
+function getClient() {
+  return client;
+}
+
 module.exports = client;
+module.exports.getClient = getClient;
