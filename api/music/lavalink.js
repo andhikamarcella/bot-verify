@@ -181,16 +181,26 @@ async function initializeLavalink(client) {
 // Search YouTube
 async function searchYouTube(query) {
   try {
+    console.log('[Lavalink] Searching for:', query);
+    console.log('[Lavalink] Manager exists:', !!lavalinkManager);
+    
     if (!lavalinkManager) {
+      console.error('[Lavalink] Manager not initialized, attempting to initialize...');
       throw new Error('Lavalink manager not initialized');
     }
 
     const node = lavalinkManager.nodes.get('main');
+    console.log('[Lavalink] Node exists:', !!node);
+    console.log('[Lavalink] Node connected:', node?.connected);
+    
     if (!node || !node.connected) {
+      console.error('[Lavalink] No Lavalink node available or not connected');
       throw new Error('No Lavalink node available');
     }
 
     const results = await node.search(query, 'youtube');
+    console.log('[Lavalink] Search results:', results?.tracks?.length || 0);
+    
     if (!results || !results.tracks || results.tracks.length === 0) {
       throw new Error('No results found');
     }
