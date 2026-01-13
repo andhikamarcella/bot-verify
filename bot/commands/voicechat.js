@@ -112,6 +112,7 @@ async function transcribeAudio(audioBuffer) {
 
 async function generateTts(text) {
   try {
+    // Try Groq TTS first
     const response = await fetch(`${GROQ_API_BASE}/audio/speech`, {
       method: 'POST',
       headers: {
@@ -125,15 +126,16 @@ async function generateTts(text) {
       }),
     });
 
-    if (!response.ok) {
-      throw new Error(`TTS generation failed: ${response.statusText}`);
+    if (response.ok) {
+      return await response.arrayBuffer();
     }
-
-    return await response.arrayBuffer();
   } catch (error) {
-    console.error('[VoiceChat] TTS error:', error);
-    return null;
+    console.error('[VoiceChat] Groq TTS error:', error);
   }
+
+  // Fallback: Simple text response (no audio)
+  console.log('[VoiceChat] TTS failed, using text fallback');
+  return null;
 }
 
 async function chatWithGroq(messages) {
@@ -263,6 +265,12 @@ module.exports = {
           inlineVolume: true,
         });
         player.play(resource);
+      } else {
+        // Fallback: Send text message instead
+        await interaction.followUp({
+          content: `🎤 **${welcomeText}**`,
+          ephemeral: true,
+        });
       }
 
       // Create audio receiver
