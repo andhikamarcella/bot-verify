@@ -1,4 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
+const path = require('path');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -14,7 +15,9 @@ module.exports = {
   async execute(interaction, client) {
     try {
       console.log('[Play] Command executed');
-      const musicCommands = require('../../api/music/lavalink').musicCommands;
+      const lavalinkPath = path.join(__dirname, '..', '..', 'api', 'music', 'lavalink');
+      console.log('[Play] Loading from:', lavalinkPath);
+      const { musicCommands } = require(lavalinkPath);
       console.log('[Play] musicCommands loaded:', typeof musicCommands);
       console.log('[Play] musicCommands.play:', typeof musicCommands?.play);
       

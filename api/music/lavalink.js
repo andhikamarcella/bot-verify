@@ -244,6 +244,7 @@ async function playTrack(guildId, track, interaction = null) {
 // Music commands
 const musicCommands = {
   async play(interaction) {
+    console.log('[MusicCommands] Play function called');
     try {
       const query = interaction.options.getString('query');
       const { member, guild } = interaction;
