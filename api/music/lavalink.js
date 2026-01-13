@@ -5,8 +5,8 @@ const path = require('path');
 
 // Lavalink configuration
 const LAVALINK_CONFIG = {
-  host: process.env.LAVALINK_HOST || 'localhost',
-  port: parseInt(process.env.LAVALINK_PORT) || 2333,
+  host: process.env.LAVALINK_HOST || 'vfy.up.railway.app',
+  port: parseInt(process.env.LAVALINK_PORT) || 3001,
   password: process.env.LAVALINK_PASSWORD || 'youshallnotpass',
   secure: process.env.LAVALINK_SECURE === 'true',
   // Add WebSocket path for Railway
@@ -125,7 +125,9 @@ async function _doInitialize(client) {
         host: LAVALINK_CONFIG.host,
         port: LAVALINK_CONFIG.port,
         password: LAVALINK_CONFIG.password,
-        secure: LAVALINK_CONFIG.secure,
+        secure: false,
+        // Try different paths for Railway
+        path: '/websocket',
       },
       {
         identifier: 'fallback-2333',
@@ -133,6 +135,7 @@ async function _doInitialize(client) {
         port: 2333,
         password: LAVALINK_CONFIG.password,
         secure: false,
+        path: '/websocket',
       },
       {
         identifier: 'fallback-80',
@@ -140,6 +143,7 @@ async function _doInitialize(client) {
         port: 80,
         password: LAVALINK_CONFIG.password,
         secure: false,
+        path: '/websocket',
       }
     ],
     send: (payload) => {
@@ -151,8 +155,10 @@ async function _doInitialize(client) {
     },
     clientID: client.user.id,
     plugins: [],
-    retryDelay: 3000,
-    retryAmount: 2,
+    retryDelay: 2000,
+    retryAmount: 1,
+    autoPlay: false,
+    moveOnDisconnect: false,
   });
 
   // Set up event listeners BEFORE initialization
