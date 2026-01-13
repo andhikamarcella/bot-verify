@@ -21,10 +21,10 @@ const client = new Client({ intents: BOT_CONFIG.intents });
 
 // Load commands
 const commands = [];
-const commandFiles = fs.readdirSync(path.join(__dirname, 'commands')).filter(file => file.endsWith('.js'));
+const commandFiles = fs.readdirSync(path.join(__dirname, 'bot', 'commands')).filter(file => file.endsWith('.js'));
 
 for (const file of commandFiles) {
-  const command = require(path.join(__dirname, 'commands', file));
+  const command = require(path.join(__dirname, 'bot', 'commands', file));
   commands.push(command.data.toJSON());
   console.log(`[Commands] Loaded command: ${command.data.name}`);
 }
