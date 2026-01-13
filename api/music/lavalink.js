@@ -82,6 +82,9 @@ let lavalinkManager = null;
 // Initialize Lavalink
 async function initializeLavalink(client) {
   try {
+    console.log('[Lavalink] Starting initialization...');
+    console.log('[Lavalink] Config:', LAVALINK_CONFIG);
+    
     lavalinkManager = new Manager({
       nodes: [
         {
@@ -168,10 +171,29 @@ async function initializeLavalink(client) {
     });
 
     // Initialize the manager
+    console.log('[Lavalink] Initializing manager...');
     await lavalinkManager.init(client.user.id);
     console.log('[Lavalink] Manager initialized successfully!');
 
-    return lavalinkManager;
+    // Wait for node connection
+    console.log('[Lavalink] Waiting for node connection...');
+    let attempts = 0;
+    const maxAttempts = 10;
+    
+    while (attempts < maxAttempts) {
+      const node = lavalinkManager.nodes.get('main');
+      if (node && node.connected) {
+        console.log('[Lavalink] Node connected successfully!');
+        return lavalinkManager;
+      }
+      
+      attempts++;
+      console.log(`[Lavalink] Waiting for connection... (${attempts}/${maxAttempts})`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    throw new Error('Node failed to connect after multiple attempts');
+
   } catch (error) {
     console.error('[Lavalink] Failed to initialize:', error);
     throw error;
