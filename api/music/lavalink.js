@@ -119,13 +119,29 @@ async function _doInitialize(client) {
   discordClient = client;
 
   const manager = new Manager({
-    nodes: [{
-      identifier: 'main',
-      host: LAVALINK_CONFIG.host,
-      port: LAVALINK_CONFIG.port,
-      password: LAVALINK_CONFIG.password,
-      secure: LAVALINK_CONFIG.secure,
-    }],
+    nodes: [
+      {
+        identifier: 'main',
+        host: LAVALINK_CONFIG.host,
+        port: LAVALINK_CONFIG.port,
+        password: LAVALINK_CONFIG.password,
+        secure: LAVALINK_CONFIG.secure,
+      },
+      {
+        identifier: 'fallback-2333',
+        host: LAVALINK_CONFIG.host,
+        port: 2333,
+        password: LAVALINK_CONFIG.password,
+        secure: false,
+      },
+      {
+        identifier: 'fallback-80',
+        host: LAVALINK_CONFIG.host,
+        port: 80,
+        password: LAVALINK_CONFIG.password,
+        secure: false,
+      }
+    ],
     send: (payload) => {
       if (client.shard) {
         client.shard.send(payload);
@@ -231,12 +247,15 @@ async function searchYouTube(query) {
       throw new Error('Lavalink not initialized. Please restart bot.');
     }
 
-    const node = lavalinkManager.nodes.get('main');
-    if (!node?.connected) {
+    // Find any connected node
+    const connectedNode = lavalinkManager.nodes.find(node => node.connected);
+    console.log('[Lavalink] Connected node:', connectedNode?.identifier || 'none');
+    
+    if (!connectedNode) {
       throw new Error('Lavalink node not connected');
     }
 
-    const results = await node.search(query, 'youtube');
+    const results = await connectedNode.search(query, 'youtube');
     console.log('[Lavalink] Search results:', results?.tracks?.length || 0);
     
     if (!results || !results.tracks || results.tracks.length === 0) {
