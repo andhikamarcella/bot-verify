@@ -12,7 +12,23 @@ module.exports = {
     ),
 
   async execute(interaction, client) {
-    const musicCommands = require('../../api/music/lavalink').musicCommands;
-    await musicCommands.play(interaction);
+    try {
+      console.log('[Play] Command executed');
+      const musicCommands = require('../../api/music/lavalink').musicCommands;
+      console.log('[Play] musicCommands loaded:', typeof musicCommands);
+      console.log('[Play] musicCommands.play:', typeof musicCommands?.play);
+      
+      if (!musicCommands || !musicCommands.play) {
+        throw new Error('musicCommands.play is not defined');
+      }
+      
+      await musicCommands.play(interaction);
+    } catch (error) {
+      console.error('[Play] Error:', error);
+      await interaction.reply({
+        content: '❌ Failed to play music. Please check if Lavalink is running.',
+        ephemeral: true,
+      });
+    }
   }
 };
