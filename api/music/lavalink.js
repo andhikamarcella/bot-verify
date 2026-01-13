@@ -8,7 +8,7 @@ const LAVALINK_CONFIG = {
   host: process.env.LAVALINK_HOST || 'localhost',
   port: parseInt(process.env.LAVALINK_PORT) || 2333,
   password: process.env.LAVALINK_PASSWORD || 'youshallnotpass',
-    secure: process.env.LAVALINK_SECURE === 'true',
+  secure: process.env.LAVALINK_SECURE === 'true',
 };
 
 // Music queue management
@@ -78,223 +78,163 @@ const musicQueue = new MusicQueue();
 // Lavalink manager instance
 let lavalinkManager = null;
 let discordClient = null;
+let isInitializing = false;
+let initializationPromise = null;
 
 // Initialize Lavalink
 async function initializeLavalink(client) {
-  try {
-    console.log('[Lavalink] Starting initialization...');
-    console.log('[Lavalink] Host:', LAVALINK_CONFIG.host);
-    console.log('[Lavalink] Port:', LAVALINK_CONFIG.port);
-    console.log('[Lavalink] Secure:', LAVALINK_CONFIG.secure);
-    console.log('[Lavalink] Password:', LAVALINK_CONFIG.password ? '***' : 'not set');
-    
-    // Store the client for emergency use
-    discordClient = client;
-    
-    // Try multiple node configurations for better compatibility
-    const nodeConfigs = [
-      {
-        // Primary configuration (Railway HTTPS)
-        identifier: 'main',
-        host: LAVALINK_CONFIG.host,
-        port: LAVALINK_CONFIG.port,
-        password: LAVALINK_CONFIG.password,
-        secure: LAVALINK_CONFIG.secure,
-      },
-      {
-        // Fallback configuration (try without secure)
-        identifier: 'fallback',
-        host: LAVALINK_CONFIG.host,
-        port: LAVALINK_CONFIG.port,
-        password: LAVALINK_CONFIG.password,
-        secure: false,
-      },
-      {
-        // Alternative port fallback (HTTP)
-        identifier: 'alt-port',
-        host: LAVALINK_CONFIG.host,
-        port: 80,
-        password: LAVALINK_CONFIG.password,
-        secure: false,
-      },
-      {
-        // Try localhost for development
-        identifier: 'localhost',
-        host: 'localhost',
-        port: 2333,
-        password: 'youshallnotpass',
-        secure: false,
-      },
-      {
-        // Try common Lavalink ports
-        identifier: 'common-port',
-        host: LAVALINK_CONFIG.host,
-        port: 2333,
-        password: LAVALINK_CONFIG.password,
-        secure: false,
-      }
-    ];
-    
-    lavalinkManager = new Manager({
-      nodes: nodeConfigs,
-      send: (payload) => {
-        // Send the payload to Discord gateway
-        if (client.shard) {
-          client.shard.send(payload);
-        } else {
-          // Fallback for non-sharded bots
-          client.ws.send(payload);
-        }
-      },
-      clientID: client.user.id,
-      plugins: [],
-      autoPlay: false,
-      retryDelay: 5000, // Increased retry delay
-      retryAmount: 5, // Increased retry attempts
-      autoSkip: true,
-      volume: 100,
-    });
-
-    // Event listeners
-    lavalinkManager.on('nodeConnect', (node) => {
-      console.log(`[Lavalink] Node ${node.identifier} connected`);
-    });
-
-    lavalinkManager.on('nodeDisconnect', (node) => {
-      console.log(`[Lavalink] Node ${node.identifier} disconnected`);
-    });
-
-    lavalinkManager.on('nodeError', (node, error) => {
-      console.error(`[Lavalink] Node ${node.identifier} error:`, error);
-    });
-
-    lavalinkManager.on('trackStart', (player, track) => {
-      const queue = musicQueue.getQueue(player.guild);
-      queue.isPlaying = true;
-      queue.currentTrack = track;
-
-      // Send now playing message
-      if (queue.textChannel) {
-        const embed = new EmbedBuilder()
-          .setTitle('🎵 Now Playing')
-          .setDescription(`**${track.title}**`)
-          .addFields(
-            { name: 'Duration', value: track.isStream ? '🔴 Live' : `${track.duration}`, inline: true },
-            { name: 'Requested by', value: track.requester?.tag || 'Unknown', inline: true }
-          )
-          .setThumbnail(track.thumbnail || null)
-          .setColor(0x00FF00);
-
-        queue.textChannel.send({ embeds: [embed] });
-      }
-    });
-
-    lavalinkManager.on('trackEnd', (player, track) => {
-      const queue = musicQueue.getQueue(player.guild);
-      
-      // Handle loop
-      if (queue.loop && track) {
-        queue.tracks.push(track);
-      }
-
-      // Play next track
-      const nextTrack = musicQueue.nextTrack(player.guild);
-      if (nextTrack) {
-        player.play(nextTrack);
-      } else {
-        queue.isPlaying = false;
-        
-        // Send queue ended message
-        if (queue.textChannel) {
-          queue.textChannel.send('🎵 Queue ended. Use `/play` to add more songs!');
-        }
-      }
-    });
-
-    lavalinkManager.on('playerCreate', (player) => {
-      console.log(`[Lavalink] Player created for guild: ${player.guild}`);
-    });
-
-    lavalinkManager.on('playerDestroy', (player) => {
-      console.log(`[Lavalink] Player destroyed for guild: ${player.guild}`);
-      musicQueue.queues.delete(player.guild);
-    });
-
-    // Initialize the manager
-    console.log('[Lavalink] Initializing manager...');
-    lavalinkManager.init(client.user.id);
-    console.log('[Lavalink] Manager initialized successfully!');
-
-    // Wait for node connection
-    console.log('[Lavalink] Waiting for node connection...');
-    let attempts = 0;
-    const maxAttempts = 15; // Increased attempts
-    
-    while (attempts < maxAttempts) {
-      // Try to find any connected node
-      const connectedNode = lavalinkManager.nodes.find(node => node.connected);
-      if (connectedNode) {
-        console.log(`[Lavalink] Node ${connectedNode.identifier} connected successfully!`);
-        return lavalinkManager;
-      }
-      
-      attempts++;
-      console.log(`[Lavalink] Waiting for connection... (${attempts}/${maxAttempts})`);
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Increased wait time
-    }
-    
-    // If no node connected, don't throw error - just log and continue without music
-    console.log('[Lavalink] Available nodes:', lavalinkManager.nodes.map(n => ({ id: n.identifier, connected: n.connected })));
-    console.warn('[Lavalink] No Lavalink nodes connected. Music functionality will be disabled.');
-    // Don't throw error - return null to indicate no music functionality
-    return null;
-
-  } catch (error) {
-    console.error('[Lavalink] Failed to initialize:', error);
-    throw error;
+  // Prevent concurrent initialization
+  if (isInitializing) {
+    return initializationPromise;
   }
+  
+  if (lavalinkManager) {
+    return lavalinkManager;
+  }
+
+  isInitializing = true;
+  initializationPromise = _doInitialize(client);
+  
+  try {
+    lavalinkManager = await initializationPromise;
+    return lavalinkManager;
+  } finally {
+    isInitializing = false;
+    initializationPromise = null;
+  }
+}
+
+async function _doInitialize(client) {
+  console.log('[Lavalink] Starting initialization...');
+  console.log('[Lavalink] Config:', {
+    host: LAVALINK_CONFIG.host,
+    port: LAVALINK_CONFIG.port,
+    secure: LAVALINK_CONFIG.secure,
+    hasPassword: !!LAVALINK_CONFIG.password
+  });
+
+  // Store the client for emergency use
+  discordClient = client;
+
+  const manager = new Manager({
+    nodes: [{
+      identifier: 'main',
+      host: LAVALINK_CONFIG.host,
+      port: LAVALINK_CONFIG.port,
+      password: LAVALINK_CONFIG.password,
+      secure: LAVALINK_CONFIG.secure,
+    }],
+    send: (payload) => {
+      if (client.shard) {
+        client.shard.send(payload);
+      } else {
+        client.ws.send(payload);
+      }
+    },
+    clientID: client.user.id,
+    plugins: [],
+    retryDelay: 5000,
+    retryAmount: 3,
+  });
+
+  // Set up event listeners BEFORE initialization
+  manager.on('nodeConnect', (node) => {
+    console.log(`✅ [Lavalink] Node ${node.identifier} connected`);
+  });
+
+  manager.on('nodeDisconnect', (node) => {
+    console.log(`❌ [Lavalink] Node ${node.identifier} disconnected`);
+  });
+
+  manager.on('nodeError', (node, error) => {
+    console.error(`🚨 [Lavalink] Node ${node.identifier} error:`, error.message);
+  });
+
+  manager.on('trackStart', (player, track) => {
+    const queue = musicQueue.getQueue(player.guild);
+    queue.isPlaying = true;
+    queue.currentTrack = track;
+
+    // Send now playing message
+    if (queue.textChannel) {
+      const embed = new EmbedBuilder()
+        .setTitle('🎵 Now Playing')
+        .setDescription(`**${track.title}**`)
+        .addFields(
+          { name: 'Duration', value: track.isStream ? '🔴 Live' : `${track.duration}`, inline: true },
+          { name: 'Requested by', value: track.requester?.tag || 'Unknown', inline: true }
+        )
+        .setThumbnail(track.thumbnail || null)
+        .setColor(0x00FF00);
+
+      queue.textChannel.send({ embeds: [embed] });
+    }
+  });
+
+  manager.on('trackEnd', (player, track) => {
+    const queue = musicQueue.getQueue(player.guild);
+    
+    // Handle loop
+    if (queue.loop && track) {
+      queue.tracks.push(track);
+    }
+
+    // Play next track
+    const nextTrack = musicQueue.nextTrack(player.guild);
+    if (nextTrack) {
+      player.play(nextTrack);
+    } else {
+      queue.isPlaying = false;
+      
+      // Send queue ended message
+      if (queue.textChannel) {
+        queue.textChannel.send('🎵 Queue ended. Use `/play` to add more songs!');
+      }
+    }
+  });
+
+  manager.on('playerCreate', (player) => {
+    console.log(`[Lavalink] Player created for guild: ${player.guild}`);
+  });
+
+  manager.on('playerDestroy', (player) => {
+    console.log(`[Lavalink] Player destroyed for guild: ${player.guild}`);
+    musicQueue.queues.delete(player.guild);
+  });
+
+  // Initialize WITHOUT await (erela.js v2 doesn't return Promise)
+  manager.init(client.user.id);
+  
+  // Wait for connection with timeout
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      console.warn('[Lavalink] Connection timeout - continuing without music');
+      resolve(null); // Don't reject, allow bot to continue
+    }, 10000);
+
+    manager.on('nodeConnect', () => {
+      clearTimeout(timeout);
+      resolve(manager);
+    });
+  });
 }
 
 // Search YouTube
 async function searchYouTube(query) {
   try {
     console.log('[Lavalink] Searching for:', query);
-    console.log('[Lavalink] Manager exists:', !!lavalinkManager);
     
+    // ✅ NO emergency initialization - check if manager exists
     if (!lavalinkManager) {
-      console.error('[Lavalink] Manager not initialized, attempting to initialize...');
-      try {
-        // Try to use the stored client first, otherwise get it from discordClient
-        let client = discordClient;
-        if (!client) {
-          const { getClient } = require('../bot/discordClient');
-          client = getClient();
-        }
-        
-        if (client && client.user) {
-          console.log('[Lavalink] Attempting emergency initialization...');
-          await initializeLavalink(client);
-          console.log('[Lavalink] Emergency initialization successful!');
-        } else {
-          throw new Error('Discord client not available');
-        }
-      } catch (initError) {
-        console.error('[Lavalink] Emergency initialization failed:', initError);
-        throw new Error('Lavalink manager not initialized and emergency initialization failed');
-      }
+      throw new Error('Lavalink not initialized. Please restart bot.');
     }
 
-    // Find any connected node
-    const connectedNode = lavalinkManager.nodes.find(node => node.connected);
-    console.log('[Lavalink] Connected node:', connectedNode?.identifier || 'none');
-    
-    if (!connectedNode) {
-      console.error('[Lavalink] No Lavalink node available or not connected');
-      console.log('[Lavalink] Available nodes:', lavalinkManager.nodes.map(n => ({ id: n.identifier, connected: n.connected })));
-      throw new Error('No Lavalink node available');
+    const node = lavalinkManager.nodes.get('main');
+    if (!node?.connected) {
+      throw new Error('Lavalink node not connected');
     }
 
-    const results = await connectedNode.search(query, 'youtube');
+    const results = await node.search(query, 'youtube');
     console.log('[Lavalink] Search results:', results?.tracks?.length || 0);
     
     if (!results || !results.tracks || results.tracks.length === 0) {
