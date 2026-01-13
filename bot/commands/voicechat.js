@@ -62,7 +62,13 @@ function normalizeAnswer(raw) {
     five: '5', six: '6', seven: '7', eight: '8', nine: '9',
     ten: '10', eleven: '11', twelve: '12', thirteen: '13', fourteen: '14',
     fifteen: '15', sixteen: '16', seventeen: '17', eighteen: '18', nineteen: '19',
-    twenty: '20'
+    twenty: '20',
+    // Indonesian numbers
+    nol: '0', satu: '1', dua: '2', tiga: '3', empat: '4',
+    lima: '5', enam: '6', tujuh: '7', delapan: '8', sembilan: '9',
+    sepuluh: '10', sebelas: '11', 'dua belas': '12', 'tiga belas': '13', 'empat belas': '14',
+    'lima belas': '15', 'enam belas': '16', 'tujuh belas': '17', 'delapan belas': '18', 'sembilan belas': '19',
+    'dua puluh': '20'
   };
 
   const words = text.split(/\s+/);
@@ -198,28 +204,27 @@ function createWavBuffer(audioData, sampleRate = 24000) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('voicechat')
-    .setDescription('Start an interactive voice chat with AI')
-    .addIntegerOption(option =>
+    .setDescription('Start interactive voice chat with AI (supports Indonesian & English)')
+    .addStringOption(option =>
       option
-        .setName('digits')
-        .setDescription('Number of digits for voice verification (3-6)')
-        .setMinValue(3)
-        .setMaxValue(6)
+        .setName('language')
+        .setDescription('Choose language (id/en)')
+        .addChoices(
+          { name: 'Indonesian', value: 'id' },
+          { name: 'English', value: 'en' }
+        )
     ),
 
   async execute(interaction) {
     const { member, guild, channel } = interaction;
+    const language = interaction.options.getString('language') || 'id';
     
     if (!member.voice.channel) {
       return await interaction.reply({
-        content: '❌ You must be in a voice channel to use voice chat!',
+        content: '❌ Kamu harus berada di voice channel untuk menggunakan voice chat!',
         ephemeral: true,
       });
     }
-
-    const digits = interaction.options.getInteger('digits') || 3;
-    const expectedDigits = randomDigits(digits);
-    const expectedWithHyphens = digitsWithHyphens(expectedDigits);
 
     try {
       await interaction.deferReply();
@@ -235,10 +240,22 @@ module.exports = {
       const player = createAudioPlayer();
       connection.subscribe(player);
 
-      // Generate TTS for the challenge
-      const ttsAudio = await generateTts(
-        `Please say the following digits clearly: ${expectedWithHyphens}. After that, you can talk with me normally.`
-      );
+      // Initialize conversation
+      let conversationMessages = [
+        {
+          role: 'system',
+          content: language === 'id' 
+            ? 'Kamu adalah asisten AI yang ramah dan membantu. Berbicaralah dalam bahasa Indonesia yang natural dan santai. Jawab pertanyaan dengan jelas dan ringkas.'
+            : 'You are a helpful and friendly AI assistant. Speak naturally and conversationally. Answer questions clearly and concisely.',
+        },
+      ];
+
+      // Generate welcome TTS
+      const welcomeText = language === 'id' 
+        ? 'Halo! Saya asisten AI. Silakan bicara apa saja, saya akan mendengarkan dan merespons. Mulai saja berbicara!'
+        : 'Hello! I\'m your AI assistant. Feel free to talk about anything, I\'ll listen and respond. Just start speaking!';
+
+      const ttsAudio = await generateTts(welcomeText);
 
       if (ttsAudio) {
         const resource = createAudioResource(Buffer.from(ttsAudio), {
@@ -252,20 +269,12 @@ module.exports = {
       const receiver = connection.receiver;
       const userId = interaction.user.id;
 
-      let verificationPassed = false;
-      let conversationMessages = [
-        {
-          role: 'system',
-          content: 'You are a helpful AI assistant. Be concise and friendly.',
-        },
-      ];
-
       const listenForSpeech = async () => {
         try {
           const opusStream = receiver.subscribe(userId, {
             end: {
               behavior: EndBehaviorType.AfterSilence,
-              duration: 1000,
+              duration: 1500,
             },
           });
 
@@ -280,78 +289,54 @@ module.exports = {
             
             const transcription = await transcribeAudio(wavBuffer);
             
-            if (!verificationPassed) {
-              const normalizedAnswer = normalizeAnswer(transcription);
-              if (normalizedAnswer === expectedDigits) {
-                verificationPassed = true;
-                const successTts = await generateTts('Verification successful! How can I help you today?');
-                
-                if (successTts) {
-                  const successResource = createAudioResource(Buffer.from(successTts), {
-                    inputType: 'arbitrary',
-                    inlineVolume: true,
-                  });
-                  player.play(successResource);
-                }
+            if (transcription.trim()) {
+              console.log(`[VoiceChat] User said: ${transcription}`);
+              
+              // Add user message to conversation
+              conversationMessages.push({
+                role: 'user',
+                content: transcription,
+              });
 
-                await interaction.followUp({
-                  content: '✅ Voice verification passed! You can now chat with me.',
-                });
-              } else {
-                const retryTts = await generateTts('That was incorrect. Please try again.');
-                
-                if (retryTts) {
-                  const retryResource = createAudioResource(Buffer.from(retryTts), {
-                    inputType: 'arbitrary',
-                    inlineVolume: true,
-                  });
-                  player.play(retryResource);
-                }
+              // Get AI response
+              const aiResponse = await chatWithGroq(conversationMessages);
+              conversationMessages.push({
+                role: 'assistant',
+                content: aiResponse,
+              });
 
-                await interaction.followUp({
-                  content: `❌ Incorrect. Expected: ${expectedWithHyphens}, Got: ${transcription}`,
+              console.log(`[VoiceChat] AI responded: ${aiResponse}`);
+
+              // Generate TTS for AI response
+              const responseTts = await generateTts(aiResponse);
+              
+              if (responseTts) {
+                const responseResource = createAudioResource(Buffer.from(responseTts), {
+                  inputType: 'arbitrary',
+                  inlineVolume: true,
                 });
+                player.play(responseResource);
               }
-            } else {
-              // Normal conversation mode
-              if (transcription.trim()) {
-                conversationMessages.push({
-                  role: 'user',
-                  content: transcription,
-                });
 
-                const aiResponse = await chatWithGroq(conversationMessages);
-                conversationMessages.push({
-                  role: 'assistant',
-                  content: aiResponse,
-                });
-
-                const responseTts = await generateTts(aiResponse);
-                
-                if (responseTts) {
-                  const responseResource = createAudioResource(Buffer.from(responseTts), {
-                    inputType: 'arbitrary',
-                    inlineVolume: true,
-                  });
-                  player.play(responseResource);
-                }
-
-                await interaction.followUp({
-                  content: `🎤 **You:** ${transcription}\n🤖 **AI:** ${aiResponse}`,
-                });
-              }
+              // Send text feedback (optional, for debugging)
+              await interaction.followUp({
+                content: `🎤 **Kamu:** ${transcription}\n🤖 **AI:** ${aiResponse}`,
+                ephemeral: true,
+              });
             }
           }
 
           // Continue listening
-          setTimeout(listenForSpeech, 500);
+          setTimeout(listenForSpeech, 1000);
         } catch (error) {
           console.error('[VoiceChat] Speech listening error:', error);
+          // Continue listening even on error
+          setTimeout(listenForSpeech, 2000);
         }
       };
 
-      // Start listening after a short delay
-      setTimeout(listenForSpeech, 2000);
+      // Start listening after welcome message
+      setTimeout(listenForSpeech, 3000);
 
       // Store session for cleanup
       sessions.set(interaction.user.id, {
@@ -367,14 +352,18 @@ module.exports = {
         },
       });
 
+      const startMessage = language === 'id'
+        ? '🎤 **Voice Chat Dimulai!**\n\nSaya siap mendengarkan. Silakan bicara apa saja dalam bahasa Indonesia atau English!'
+        : '🎤 **Voice Chat Started!**\n\nI\'m ready to listen. Feel free to talk about anything in Indonesian or English!';
+
       await interaction.editReply({
-        content: `🎤 Voice chat started! Say: **${expectedWithHyphens}** to verify.`,
+        content: startMessage,
       });
 
     } catch (error) {
       console.error('[VoiceChat] Command error:', error);
       await interaction.editReply({
-        content: '❌ Failed to start voice chat. Please try again.',
+        content: '❌ Gagal memulai voice chat. Silakan coba lagi.',
       });
     }
   },
