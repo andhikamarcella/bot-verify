@@ -9,6 +9,8 @@ const LAVALINK_CONFIG = {
   port: parseInt(process.env.LAVALINK_PORT) || 2333,
   password: process.env.LAVALINK_PASSWORD || 'youshallnotpass',
   secure: process.env.LAVALINK_SECURE === 'true',
+  // Add WebSocket path for Railway
+  path: process.env.LAVALINK_PATH || '/v4/websocket',
 };
 
 // Music queue management
@@ -133,8 +135,8 @@ async function _doInitialize(client) {
     },
     clientID: client.user.id,
     plugins: [],
-    retryDelay: 5000,
-    retryAmount: 3,
+    retryDelay: 3000,
+    retryAmount: 2,
   });
 
   // Set up event listeners BEFORE initialization
