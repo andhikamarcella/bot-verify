@@ -480,7 +480,30 @@ module.exports = {
           const baseUrl = process.env.PUBLIC_FRONTEND_URL || process.env.FRONTEND_BASE || 'http://localhost:3000';
           
           // Create a proper verification token for interview
+<<<<<<< HEAD
           const { createTokenDocument } = require('../../api/models/Tokens');
+=======
+          // Dynamic require with fallback for deployment environment
+          let tokensModel;
+          try {
+            tokensModel = require('../../api/models/Tokens');
+          } catch (error) {
+            console.error('[VoiceVerify] Failed to load Tokens model from relative path, trying absolute path...');
+            try {
+              tokensModel = require('/app/api/models/Tokens');
+            } catch (absError) {
+              console.error('[VoiceVerify] Failed to load Tokens model from absolute path, trying alternative...');
+              try {
+                tokensModel = require('../models/Tokens');
+              } catch (altError) {
+                console.error('[VoiceVerify] All attempts to load Tokens model failed:', altError);
+                throw new Error('Cannot load Tokens model');
+              }
+            }
+          }
+          
+          const { createTokenDocument } = tokensModel;
+>>>>>>> 7874041 (feat: Add music streaming with Lavalink and YouTube support)
           const crypto = require('crypto');
           const interviewToken = crypto.randomUUID(); // Use same format as web verification
           
