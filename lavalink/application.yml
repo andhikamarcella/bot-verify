@@ -1,0 +1,62 @@
+# Lavalink Configuration
+# Download Lavalink.jar from: https://github.com/lavalink-devs/Lavalink/releases
+
+# Server settings
+server:
+  port: 2333
+  address: localhost
+  http2:
+    enabled: false
+
+# Lavalink server password
+lavalink:
+  server:
+    password: youshallnotpass
+
+# YouTube source plugin configuration
+plugins:
+  - youtube:
+      enabled: true
+      allowSearch: true
+      allowDirectVideoIds: true
+      allowDirectPlaylistIds: true
+      clients:
+        - MUSIC
+        - ANDROID_VR
+        - WEB
+        - WEBEMBED
+        - WEB_REMIX
+        - TVHTML5
+        - TVHTML5_EMBED
+        - ANDROID
+        - IOS
+
+# Buffer settings
+bufferDurationMs: 400
+bufferedTracks: 3
+
+# Frame buffer settings
+frameBufferDurationMs: 5000
+
+# Opus encoder settings
+opusEncoding:
+  enabled: true
+  bitrate: 128000
+  sampleRate: 48000
+  channels: 2
+
+# YouTube API key (optional but recommended)
+# Get from: https://console.developers.google.com/
+youtube:
+  apiKey: "AIzaSyAN6ecNTVFGLm4R-83H4qm7VsFsbpzpMRY"
+
+# Track loading settings
+sourceResolving:
+  youtube:
+    enabled: true
+    searchLimit: 10
+    playlistLoadLimit: 100
+
+# GC settings
+gc:
+  threshold: -1
