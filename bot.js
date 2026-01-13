@@ -1,13 +1,13 @@
 const { Client, GatewayIntentBits, REST, Routes } = require('discord.js');
-const { initializeLavalink } = require('./music/lavalink');
+const { initializeLavalink } = require('./api/music/lavalink');
 const fs = require('fs');
 const path = require('path');
 
 // Bot configuration
 const BOT_CONFIG = {
-  token: process.env.DISCORD_BOT_TOKEN,
+  token: process.env.DISCORD_TOKEN,
   clientId: process.env.DISCORD_CLIENT_ID,
-  guildId: process.env.DISCORD_GUILD_ID, // Optional: for instant guild deployment
+  guildId: process.env.GUILD_ID, // Optional: for instant guild deployment
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
