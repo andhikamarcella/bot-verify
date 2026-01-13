@@ -6,10 +6,9 @@ const path = require('path');
 // Lavalink configuration
 const LAVALINK_CONFIG = {
   host: process.env.LAVALINK_HOST || 'localhost',
-  port: process.env.LAVALINK_PORT || 2333,
+  port: parseInt(process.env.LAVALINK_PORT) || 2333,
   password: process.env.LAVALINK_PASSWORD || 'youshallnotpass',
-  id: process.env.LAVALINK_CLIENT_ID || 'your-bot-client-id',
-  secure: process.env.LAVALINK_SECURE === 'true',
+    secure: process.env.LAVALINK_SECURE === 'true',
 };
 
 // Music queue management
@@ -84,7 +83,10 @@ let discordClient = null;
 async function initializeLavalink(client) {
   try {
     console.log('[Lavalink] Starting initialization...');
-    console.log('[Lavalink] Config:', LAVALINK_CONFIG);
+    console.log('[Lavalink] Host:', LAVALINK_CONFIG.host);
+    console.log('[Lavalink] Port:', LAVALINK_CONFIG.port);
+    console.log('[Lavalink] Secure:', LAVALINK_CONFIG.secure);
+    console.log('[Lavalink] Password:', LAVALINK_CONFIG.password ? '***' : 'not set');
     
     // Store the client for emergency use
     discordClient = client;
@@ -100,8 +102,13 @@ async function initializeLavalink(client) {
         },
       ],
       send: (payload) => {
-        const guild = client.guilds.cache.get(payload.d.guild_id);
-        if (guild) guild.shard.send(payload);
+        // Send the payload to Discord gateway
+        if (client.shard) {
+          client.shard.send(payload);
+        } else {
+          // Fallback for non-sharded bots
+          client.ws.send(payload);
+        }
       },
       clientID: client.user.id,
       plugins: [],
