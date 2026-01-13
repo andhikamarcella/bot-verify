@@ -983,8 +983,19 @@ async function handleMessageCreate(message) {
   });
 }
 
-client.once(Events.ClientReady, () => {
+client.once(Events.ClientReady, async () => {
   console.log(`Bot masuk sebagai ${client.user.tag}`);
+
+  // Initialize Lavalink for music functionality
+  try {
+    const { initializeLavalink } = require('../api/music/lavalink');
+    console.log('[Bot] Initializing Lavalink...');
+    await initializeLavalink(client);
+    console.log('[Bot] Lavalink initialized successfully!');
+  } catch (error) {
+    console.error('[Bot] Failed to initialize Lavalink:', error);
+    console.log('[Bot] Music commands will not be available');
+  }
 
   let presenceIndex = 0;
   const applyPresence = () => {
@@ -1020,6 +1031,16 @@ client.on(Events.GuildMemberAdd, (member) => {
   handleMemberJoin(member).catch((err) => {
     console.error('GuildMemberAdd handler error', err);
   });
+});
+
+// Handle voice state updates for Lavalink
+client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+  try {
+    const { handleVoiceStateUpdate } = require('../api/music/lavalink');
+    handleVoiceStateUpdate(oldState, newState);
+  } catch (error) {
+    console.error('[Bot] Voice state update error:', error);
+  }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
