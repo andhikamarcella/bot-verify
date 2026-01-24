@@ -20,7 +20,7 @@ lavalink:
       vimeo: true
       http: true
       local: false
-    filters: true
+    filters: {}
     ws:
       path: "/v4/websocket"
 logging:
