@@ -125,9 +125,8 @@ async function _doInitialize(client) {
         host: LAVALINK_CONFIG.host,
         port: LAVALINK_CONFIG.port,
         password: LAVALINK_CONFIG.password,
-        secure: false,
-        // Try different paths for Railway
-        path: '/websocket',
+        secure: Boolean(LAVALINK_CONFIG.secure),
+        path: LAVALINK_CONFIG.path,
       },
       {
         identifier: 'fallback-2333',
@@ -135,7 +134,7 @@ async function _doInitialize(client) {
         port: 2333,
         password: LAVALINK_CONFIG.password,
         secure: false,
-        path: '/websocket',
+        path: LAVALINK_CONFIG.path,
       },
       {
         identifier: 'fallback-80',
@@ -143,7 +142,7 @@ async function _doInitialize(client) {
         port: 80,
         password: LAVALINK_CONFIG.password,
         secure: false,
-        path: '/websocket',
+        path: LAVALINK_CONFIG.path,
       }
     ],
     send: (payload) => {
