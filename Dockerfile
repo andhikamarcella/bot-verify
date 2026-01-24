@@ -10,10 +10,13 @@ RUN cat > application.yml << 'EOF'
 server:
   port: 2333
 lavalink:
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.16.0"
+      snapshot: false
   server:
     password: "youshallnotpass"
     sources:
-      youtube: true
+      youtube: false
       bandcamp: true
       soundcloud: true
       twitch: true
@@ -23,6 +26,12 @@ lavalink:
     filters: {}
     ws:
       path: "/v4/websocket"
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
 logging:
   file:
     path: ./logs/
