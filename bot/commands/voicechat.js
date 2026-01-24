@@ -166,41 +166,23 @@ async function chatWithGroq(messages) {
   }
 }
 
-function createWavBuffer(audioData, sampleRate = 24000) {
-  const length = audioData.length;
-  const arrayBuffer = new ArrayBuffer(44 + length * 2);
-  const view = new DataView(arrayBuffer);
-
-  // WAV header
-  const writeString = (offset, string) => {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
-    }
-  };
-
-  writeString(0, 'RIFF');
-  view.setUint32(4, 36 + length * 2, true);
-  writeString(8, 'WAVE');
-  writeString(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeString(36, 'data');
-  view.setUint32(40, length * 2, true);
-
-  // PCM data
-  let offset = 44;
-  for (let i = 0; i < length; i++) {
-    const sample = Math.max(-1, Math.min(1, audioData[i]));
-    view.setInt16(offset, sample * 0x7FFF, true);
-    offset += 2;
-  }
-
-  return Buffer.from(arrayBuffer);
+function createWavBuffer(pcmBuffer, sampleRate = 48000, channels = 1) {
+  const dataLength = pcmBuffer.length;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + dataLength, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * channels * 2, 28);
+  header.writeUInt16LE(channels * 2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(dataLength, 40);
+  return Buffer.concat([header, pcmBuffer]);
 }
 
 module.exports = {
@@ -322,8 +304,14 @@ module.exports = {
           }
 
           if (audioData.length > 0) {
-            const buffer = Buffer.concat(audioData);
-            const wavBuffer = createWavBuffer(buffer);
+            const decoder = new prism.opus.Decoder({ rate: 48000, channels: 1, frameSize: 960 });
+            const pcmChunks = [];
+            const pcmStream = Readable.from(Buffer.concat(audioData)).pipe(decoder);
+            for await (const chunk of pcmStream) {
+              pcmChunks.push(chunk);
+            }
+            const pcmBuffer = Buffer.concat(pcmChunks);
+            const wavBuffer = createWavBuffer(pcmBuffer, 48000, 1);
             
             const transcription = await transcribeAudio(wavBuffer);
             
