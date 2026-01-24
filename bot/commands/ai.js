@@ -6,7 +6,7 @@ const { upsertUserProfile } = require('../../api/models/Users');
 const { upsertVerificationProfile } = require('../../api/models/VerificationProfiles');
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const DEFAULT_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+const DEFAULT_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 const DEFAULT_SAFETY_MODEL = process.env.GROQ_SAFETY_MODEL || DEFAULT_MODEL;
 
 function chunkText(text, maxLen) {
