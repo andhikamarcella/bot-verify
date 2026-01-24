@@ -18,7 +18,7 @@ const { normalizeTtsText } = require('../utils/tts');
 const GROQ_API_BASE = 'https://api.groq.com/openai/v1';
 const GROQ_CHAT_URL = `${GROQ_API_BASE}/chat/completions`;
 
-const DEFAULT_CHAT_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+const DEFAULT_CHAT_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 const DEFAULT_STT_MODEL = process.env.GROQ_STT_MODEL || 'whisper-large-v3-turbo';
 const DEFAULT_TTS_MODEL = process.env.GROQ_TTS_MODEL || 'canopylabs/orpheus-v1-english';
 const DEFAULT_TTS_VOICE = process.env.GROQ_TTS_VOICE || 'troy';
@@ -207,16 +207,45 @@ async function sendVerificationLog(client, guildId, logData) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('voiceverify')
-    .setDescription('Verify your identity using voice recognition')
-    .addIntegerOption(option =>
-      option
-        .setName('digits')
-        .setDescription('Number of digits for verification (3-6)')
-        .setMinValue(3)
-        .setMaxValue(6)
+    .setDescription('Verifikasi menggunakan suara')
+    .addSubcommand(sub =>
+      sub
+        .setName('start')
+        .setDescription('Mulai verifikasi suara')
+        .addIntegerOption(option =>
+          option
+            .setName('digits')
+            .setDescription('Jumlah digit (3-6)')
+            .setMinValue(3)
+            .setMaxValue(6)
+        )
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('stop')
+        .setDescription('Hentikan sesi voice verify dan disconnect bot')
     ),
 
   async execute(interaction, client) {
+    const sub = interaction.options.getSubcommand?.() || 'start';
+    if (sub === 'stop') {
+      const guild = interaction.guild;
+      if (!guild) {
+        await interaction.reply({ content: 'Command ini hanya bisa dipakai di server.', flags: 64 });
+        return;
+      }
+      const map = globalThis.__voiceConnections || new Map();
+      const { getVoiceConnection } = require('@discordjs/voice');
+      const connection = map.get(guild.id) || getVoiceConnection(guild.id);
+      if (!connection) {
+        await interaction.reply({ content: 'Bot tidak sedang berada di voice channel.', flags: 64 });
+        return;
+      }
+      try { connection.destroy(); } catch (_) {}
+      try { map.delete(guild.id); } catch (_) {}
+      await interaction.reply({ content: '✅ Sesi voice verify dihentikan dan bot disconnect.', flags: 64 });
+      return;
+    }
     const { member, guild } = interaction;
     
     if (!member.voice.channel) {
@@ -250,6 +279,7 @@ module.exports = {
         selfDeaf: false,
         selfMute: true,
       });
+      try { globalThis.__voiceConnections.set(guild.id, connection); } catch (_) {}
 
       const player = createAudioPlayer();
       connection.subscribe(player);
