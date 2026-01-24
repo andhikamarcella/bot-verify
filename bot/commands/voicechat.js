@@ -18,7 +18,7 @@ const { normalizeTtsText } = require('../utils/tts');
 const GROQ_API_BASE = 'https://api.groq.com/openai/v1';
 const GROQ_CHAT_URL = `${GROQ_API_BASE}/chat/completions`;
 
-const DEFAULT_CHAT_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+const DEFAULT_CHAT_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 const DEFAULT_STT_MODEL = process.env.GROQ_STT_MODEL || 'whisper-large-v3-turbo';
 const DEFAULT_TTS_MODEL = process.env.GROQ_TTS_MODEL || 'canopylabs/orpheus-v1-english';
 const DEFAULT_TTS_VOICE = process.env.GROQ_TTS_VOICE || 'troy';
@@ -206,18 +206,47 @@ function createWavBuffer(audioData, sampleRate = 24000) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('voicechat')
-    .setDescription('Start interactive voice chat with AI (supports Indonesian & English)')
-    .addStringOption(option =>
-      option
-        .setName('language')
-        .setDescription('Choose language (id/en)')
-        .addChoices(
-          { name: 'Indonesian', value: 'id' },
-          { name: 'English', value: 'en' }
+    .setDescription('Voice chat dengan AI')
+    .addSubcommand(sub =>
+      sub
+        .setName('start')
+        .setDescription('Mulai voice chat dengan AI')
+        .addStringOption(option =>
+          option
+            .setName('language')
+            .setDescription('Pilih bahasa (id/en)')
+            .addChoices(
+              { name: 'Indonesian', value: 'id' },
+              { name: 'English', value: 'en' }
+            )
         )
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('stop')
+        .setDescription('Hentikan sesi voice chat dan disconnect bot')
     ),
 
   async execute(interaction) {
+    const sub = interaction.options.getSubcommand?.() || 'start';
+    if (sub === 'stop') {
+      const guild = interaction.guild;
+      if (!guild) {
+        await interaction.reply({ content: 'Command ini hanya bisa dipakai di server.', flags: 64 });
+        return;
+      }
+      const map = globalThis.__voiceConnections;
+      const { getVoiceConnection } = require('@discordjs/voice');
+      const connection = map.get(guild.id) || getVoiceConnection(guild.id);
+      if (!connection) {
+        await interaction.reply({ content: 'Bot tidak sedang berada di voice channel.', flags: 64 });
+        return;
+      }
+      try { connection.destroy(); } catch (_) {}
+      try { map.delete(guild.id); } catch (_) {}
+      await interaction.reply({ content: '✅ Sesi voice chat dihentikan dan bot disconnect.', flags: 64 });
+      return;
+    }
     const { member, guild, channel } = interaction;
     const language = interaction.options.getString('language') || 'id';
     
@@ -238,6 +267,7 @@ module.exports = {
         selfDeaf: false,
         selfMute: false,
       });
+      try { globalThis.__voiceConnections.set(guild.id, connection); } catch (_) {}
 
       const player = createAudioPlayer();
       connection.subscribe(player);
