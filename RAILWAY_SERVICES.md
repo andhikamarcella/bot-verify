@@ -27,5 +27,4 @@ Repo ini idealnya dijalankan sebagai 2 service terpisah:
     - `LAVALINK_PORT=443`
     - `LAVALINK_SECURE=true`
     - `LAVALINK_PASSWORD=<password yang sama dengan lavalink>`
-    - `LAVALINK_PATH=/v4/websocket`
-
+    - `LAVALINK_PATH=/`
