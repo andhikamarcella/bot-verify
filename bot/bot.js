@@ -82,7 +82,20 @@ const { getExtraRolesForUser } = require('../api/lib/roleSync');
 const { computeRiskScore } = require('../api/lib/riskScore');
 
 const GUILD_ID = process.env.GUILD_ID;
-const FRONTEND_URL = (process.env.PUBLIC_FRONTEND_URL || '').replace(/\/$/, '');
+function sanitizeEnvString(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^[`"']+/, '')
+    .replace(/[`"']+$/, '')
+    .trim();
+}
+
+function sanitizeUrlBase(value) {
+  const cleaned = sanitizeEnvString(value);
+  return cleaned ? cleaned.replace(/\/+$/, '') : '';
+}
+
+const FRONTEND_URL = sanitizeUrlBase(process.env.PUBLIC_FRONTEND_URL);
 const SUPPORT_INVITE_URL = 'https://discord.gg/w3ENr2uEeH';
 
 const COMMANDS_DIR = path.join(__dirname, 'commands');
@@ -335,51 +348,8 @@ async function enforceBlacklistOnMember({ guild, member, reason }) {
 // Completely self-contained callGroqChat function
 async function inlineCallGroqChat(prompt, language = 'id', systemPrompt = null) {
   try {
-    const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API_KEY_FALLBACK;
-    if (!apiKey) throw new Error('missing-groq-api-key');
-
-    const model = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
-    const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-    
-    // Build messages array
-    const messages = [];
-    
-    // Add system prompt if provided
-    if (systemPrompt) {
-      messages.push({ role: 'system', content: systemPrompt });
-    } else {
-      // Default system prompt
-      const defaultSystem = language === 'en' 
-        ? 'You are a helpful AI assistant. Be friendly and concise.'
-        : 'Kamu adalah asisten AI yang helpful. Jawab dengan ramah dan singkat.';
-      messages.push({ role: 'system', content: defaultSystem });
-    }
-    
-    // Add user prompt
-    messages.push({ role: 'user', content: String(prompt) });
-
-    // Direct API call
-    const response = await fetch(GROQ_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: String(model),
-        temperature: 0.7,
-        max_tokens: 512,
-        messages,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Groq API error: ${response.status} ${response.statusText}`);
-    }
-
-    const json = await response.json();
-    return json?.choices?.[0]?.message?.content || 'Maaf, aku tidak bisa menjawab saat ini.';
-    
+    const { callGroqChat } = require('./commands/ai');
+    return await callGroqChat(prompt, language, systemPrompt);
   } catch (error) {
     console.error('[Inline CallGroqChat] Error:', error);
     return 'Maaf, terjadi kesalahan dengan AI. Coba lagi nanti ya.';
@@ -676,7 +646,13 @@ async function scheduleReminder(member) {
       }
 
       if (!FRONTEND_URL) {
-        await member.send('Hai! Jalankan perintah /verify start di server untuk mendapatkan tautan verifikasi.');
+        const userProfile = await getUserProfile(member.id, member.guild.id).catch(() => null);
+        const lang = userProfile?.language === 'en' ? 'en' : 'id';
+        await member.send(
+          lang === 'en'
+            ? 'Hi! Run /verify start in the server to get your verification link.'
+            : 'Hai! Jalankan perintah /verify start di server untuk mendapatkan tautan verifikasi.'
+        );
         return;
       }
       const latestToken = await findLatestByUser(member.id, member.guild.id);
@@ -701,8 +677,10 @@ async function scheduleReminder(member) {
         });
       }
       const verificationUrl = `${FRONTEND_URL}/verify?token=${tokenDoc.token}`;
+      const userProfile = await getUserProfile(member.id, member.guild.id).catch(() => null);
+      const lang = userProfile?.language === 'en' ? 'en' : 'id';
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setLabel('Verify Me').setStyle(ButtonStyle.Link).setURL(verificationUrl)
+        new ButtonBuilder().setLabel(lang === 'en' ? 'Verify Me' : 'Verifikasi Sekarang').setStyle(ButtonStyle.Link).setURL(verificationUrl)
       );
 
       try {
@@ -730,11 +708,15 @@ async function scheduleReminder(member) {
 
       const dmMessage = await member.send({
         content: [
-          `Hai ${member.user.username}!`,
-          'Kami belum mendeteksi bahwa kamu sudah diverifikasi.',
-          'Klik tombol di bawah untuk menyelesaikan verifikasi dan mendapatkan akses penuh.',
+          lang === 'en' ? `Hi ${member.user.username}!` : `Hai ${member.user.username}!`,
+          lang === 'en' ? "We haven't detected that you're verified yet." : 'Kami belum mendeteksi bahwa kamu sudah diverifikasi.',
+          lang === 'en'
+            ? 'Step 1 → Click the button below\nStep 2 → Complete captcha on the website\nDone → You will get access automatically'
+            : 'Step 1 → Klik tombol di bawah\nStep 2 → Selesaikan captcha di website\nSelesai → Kamu akan dapat akses otomatis',
           '',
-          `Kalau tombol tidak muncul, salin tautan ini: ${verificationUrl}`,
+          lang === 'en'
+            ? `If the button does not work, use this link: ${verificationUrl}`
+            : `Kalau tombol tidak muncul, salin tautan ini: ${verificationUrl}`,
         ].join('\n'),
         components: [row],
       });
