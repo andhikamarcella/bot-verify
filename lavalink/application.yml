@@ -5,6 +5,13 @@
 server:
   port: 2333
 
+spring:
+  cloud:
+    config:
+      enabled: false
+      import-check:
+        enabled: false
+
 lavalink:
   plugins:
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.17.0"
