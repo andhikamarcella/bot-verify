@@ -342,11 +342,9 @@ async function callGroqChat(prompt, language = 'id', systemPrompt = null) {
   return response?.content || 'Maaf, aku tidak bisa menjawab saat ini.';
 }
 
-// Export functions for use in other files
-module.exports.callGroq = callGroq;
-module.exports.callGroqChat = callGroqChat;
-
 module.exports = {
+  callGroq,
+  callGroqChat,
   data: new SlashCommandBuilder()
     .setName('ai')
     .setDescription('Chat dengan AI (Groq)')
