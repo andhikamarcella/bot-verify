@@ -22,16 +22,24 @@ function cleanPath(value) {
   return v.startsWith('/') ? v : `/${v}`;
 }
 
+function cleanHost(value) {
+  let v = cleanEnv(value);
+  if (!v) return '';
+  v = v.replace(/^https?:\/\//i, '').replace(/^wss?:\/\//i, '');
+  v = v.split('/')[0];
+  return v.trim();
+}
+
 // Lavalink configuration
 const LAVALINK_CONFIG = {
-  host: cleanEnv(process.env.LAVALINK_HOST) || 'localhost',
+  host: cleanHost(process.env.LAVALINK_HOST) || 'localhost',
   port: parseInt(cleanEnv(process.env.LAVALINK_PORT) || '2333', 10) || 2333,
   password:
     cleanEnv(process.env.LAVALINK_PASSWORD) ||
     cleanEnv(process.env.LAVALINK_SERVER_PASSWORD) ||
     'youshallnotpass',
   secure: String(cleanEnv(process.env.LAVALINK_SECURE) || '').toLowerCase() === 'true',
-  path: cleanPath(process.env.LAVALINK_PATH) || '/v4/websocket',
+  path: cleanPath(process.env.LAVALINK_PATH) || '/',
 };
 
 // Music queue management
