@@ -199,11 +199,13 @@ async function _doInitialize(client) {
 
   // Set up event listeners BEFORE initialization
   manager.on('nodeConnect', (node) => {
-    console.log(`✅ [Lavalink] Node ${node.identifier} connected`);
+    const nodeId = node?.identifier || node?.options?.identifier || 'unknown';
+    console.log(`✅ [Lavalink] Node ${nodeId} connected`);
   });
 
   manager.on('nodeDisconnect', (node) => {
-    console.log(`❌ [Lavalink] Node ${node.identifier} disconnected`);
+    const nodeId = node?.identifier || node?.options?.identifier || 'unknown';
+    console.log(`❌ [Lavalink] Node ${nodeId} disconnected`);
   });
 
   manager.on('nodeError', (node, error) => {
