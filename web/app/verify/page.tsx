@@ -55,7 +55,34 @@ export default function VerifyPage() {
   const [agreedTerms, setAgreedTerms] = useState(false);
   const [agreedPrivacy, setAgreedPrivacy] = useState(false);
   
-  const [captchaResult, setCaptchaResult] = useState<{ type: "turnstile" | "fallbackEmoji"; value: string } | null>(null);
+  type CaptchaPayload = { type: "turnstile" | "recaptchaV2" | "recaptchaEnterprise" | "fallbackEmoji"; value: string; action?: string };
+  type CaptchaMode = "auto" | "turnstile" | "recaptchaV2" | "both" | "recaptchaEnterprise";
+
+  const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
+  const recaptchaV2SiteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || "";
+  const recaptchaEnterpriseSiteKey = process.env.NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY || "";
+  const recaptchaEnterpriseAction = process.env.NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_ACTION || "LOGIN";
+
+  const captchaMode = useMemo<CaptchaMode>(() => {
+    const raw = String(process.env.NEXT_PUBLIC_CAPTCHA_MODE || "").trim().toLowerCase();
+    const hasTurnstile = Boolean(turnstileSiteKey && turnstileSiteKey.trim());
+    const hasV2 = Boolean(recaptchaV2SiteKey && recaptchaV2SiteKey.trim());
+    const hasEnterprise = Boolean(recaptchaEnterpriseSiteKey && recaptchaEnterpriseSiteKey.trim());
+
+    if (raw === "both") return "both";
+    if (raw === "turnstile") return "turnstile";
+    if (raw === "recaptcha" || raw === "recaptchav2" || raw === "v2") return "recaptchaV2";
+    if (raw === "enterprise" || raw === "recaptchaenterprise") return "recaptchaEnterprise";
+
+    if (hasTurnstile && hasV2) return "both";
+    if (hasTurnstile) return "turnstile";
+    if (hasV2) return "recaptchaV2";
+    if (hasEnterprise) return "recaptchaEnterprise";
+    return "auto";
+  }, [turnstileSiteKey, recaptchaV2SiteKey, recaptchaEnterpriseSiteKey]);
+
+  const [captchaResult, setCaptchaResult] = useState<CaptchaPayload | null>(null);
+  const [captchaResults, setCaptchaResults] = useState<Partial<Record<"turnstile" | "recaptchaV2", CaptchaPayload>>>({});
 
   const [nickname, setNickname] = useState<string>('');
   const [nicknameSuggestions, setNicknameSuggestions] = useState<string[]>([]);
@@ -69,7 +96,7 @@ export default function VerifyPage() {
   const [pageUrl, setPageUrl] = useState<string>('');
 
   // Memoize callback untuk mencegah re-render
-  const handleCaptchaSolved = useCallback((res: { type: "turnstile" | "fallbackEmoji"; value: string }) => {
+  const handleCaptchaSolved = useCallback((res: CaptchaPayload) => {
     console.log('[Captcha] handleCaptchaSolved called', { 
       type: res.type, 
       hasValue: !!res.value,
@@ -96,7 +123,13 @@ export default function VerifyPage() {
       }
     }
 
-    console.log('[Captcha] Setting captcha result, proceeding to verification');
+    if (captchaMode === "both" && (res.type === "turnstile" || res.type === "recaptchaV2")) {
+      setCaptchaResults((prev) => ({ ...prev, [res.type]: res }));
+      setStatusMsg("");
+      return;
+    }
+
+    console.log('[Captcha] Setting captcha result');
     setCaptchaResult(res);
     
     // Auto-submit jika Turnstile berhasil (optional, bisa di-comment jika ingin manual)
@@ -105,7 +138,7 @@ export default function VerifyPage() {
     //     handleVerify();
     //   }, 500);
     // }
-  }, [t.verifyFailed]);
+  }, [t.verifyFailed, captchaMode]);
 
   // Initial Load & Pre-check
   useEffect(() => {
@@ -264,32 +297,46 @@ export default function VerifyPage() {
 
   const handleVerify = useCallback(async (tokenOverride?: string) => {
   const activeToken = tokenOverride || token;
-  if (!activeToken || !captchaResult) {
-    console.warn('[Verify] Missing token or captchaResult', { token: !!token, captchaResult: !!captchaResult });
+  if (!activeToken) {
+    console.warn('[Verify] Missing token', { token: !!token });
     return;
   }
 
-  if (!captchaResult.value || captchaResult.value.trim() === '') {
-    console.warn('[Verify] Captcha result value is empty', captchaResult);
+  const requiredCaptchaOk =
+    captchaMode === "both"
+      ? Boolean(captchaResults.turnstile?.value && captchaResults.recaptchaV2?.value)
+      : Boolean(captchaResult?.value);
+  if (!requiredCaptchaOk) {
     setStatusMsg(t.captchaMissing);
     return;
   }
 
-  // Validate Turnstile token format
-  if (captchaResult.type === 'turnstile') {
-    if (captchaResult.value.length < 100) {
-      console.error('[Verify] Turnstile token too short:', captchaResult.value.length);
-      setStatusMsg(t.verifyFailed + ' (Token tidak valid)');
+  const normalizedCaptchaResults: CaptchaPayload[] =
+    captchaMode === "both"
+      ? [
+          { type: "turnstile", value: String(captchaResults.turnstile?.value || "") },
+          { type: "recaptchaV2", value: String(captchaResults.recaptchaV2?.value || "") },
+        ]
+      : captchaResult
+        ? [{ type: captchaResult.type, value: captchaResult.value, action: captchaResult.action }]
+        : [];
+
+  for (const item of normalizedCaptchaResults) {
+    if (!item.value || item.value.trim() === "") {
+      setStatusMsg(t.captchaMissing);
+      return;
+    }
+    if (item.type === "turnstile" && item.value.length < 100) {
+      setStatusMsg(t.verifyFailed + " (Token tidak valid)");
       setCaptchaResult(null);
+      setCaptchaResults({});
       return;
     }
   }
 
   console.log('[Verify] Starting verification', { 
     token: activeToken.substring(0, 10) + '...', 
-    captchaType: captchaResult.type,
-    hasValue: !!captchaResult.value,
-    tokenLength: captchaResult.value.length,
+    captchaTypes: normalizedCaptchaResults.map((c) => c.type),
     timestamp: new Date().toISOString()
   });
 
@@ -305,17 +352,23 @@ export default function VerifyPage() {
   }
 
   // Get real IP address (will be handled by backend if not available)
-  const body = {
+  const body: any = {
     token: activeToken,
-    captchaResult: {
-      type: captchaResult.type,
-      value: captchaResult.value.trim() // Ensure no whitespace
-    },
     profile: {
       displayName: nickname.trim() ? nickname.trim().slice(0, 32) : undefined,
       applicationReason: applicationReason.trim() ? applicationReason.trim().slice(0, 500) : undefined,
     },
   };
+  if (captchaMode === "both") {
+    body.captchaResults = normalizedCaptchaResults.map((c) => ({ type: c.type, value: String(c.value).trim() }));
+  } else {
+    const single = normalizedCaptchaResults[0];
+    body.captchaResult = {
+      type: single.type,
+      value: String(single.value).trim(),
+      action: single.action,
+    };
+  }
 
   try {
     const res = await fetch(
@@ -349,6 +402,7 @@ export default function VerifyPage() {
       setStep(1);
       // Reset captcha result untuk allow retry
       setCaptchaResult(null);
+      setCaptchaResults({});
       
       let errorMessage = t.verifyFailed;
       if (data.error) {
@@ -398,11 +452,14 @@ export default function VerifyPage() {
     console.error('[Verify] Error:', err);
     setStep(1);
     setCaptchaResult(null);
+    setCaptchaResults({});
     setStatusMsg(t.errors.apiTimeout);
   }
 }, [
   token,
   captchaResult,
+  captchaResults,
+  captchaMode,
   t.captchaMissing,
   t.verifyFailed,
   t.verifying,
@@ -667,19 +724,66 @@ export default function VerifyPage() {
                         <div className="text-[11px] text-slate-400">{t.applicationReasonHint}</div>
                     </div>
 
-                    <div className="flex justify-center p-4 bg-slate-800/30 rounded-2xl border border-slate-700/50">
-                        <CaptchaBlock 
-                            siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ''}
-                            fallbackText={t.captchaFallback}
-                            onSolved={handleCaptchaSolved}
-                        />
+                    <div className="space-y-3">
+                        {captchaMode === "both" ? (
+                            <div className="grid gap-3">
+                                <div className="p-4 bg-slate-800/30 rounded-2xl border border-slate-700/50">
+                                    <div className="flex items-center justify-between mb-2 text-[11px] text-slate-300">
+                                        <span>Cloudflare Turnstile</span>
+                                        <span className={captchaResults.turnstile?.value ? 'text-green-400' : 'text-slate-500'}>
+                                            {captchaResults.turnstile?.value ? '✅' : '⏳'}
+                                        </span>
+                                    </div>
+                                    <CaptchaBlock
+                                        siteKey={turnstileSiteKey}
+                                        recaptchaV2SiteKey=""
+                                        enterpriseSiteKey=""
+                                        enterpriseAction={recaptchaEnterpriseAction}
+                                        fallbackText={t.captchaFallback}
+                                        onSolved={handleCaptchaSolved}
+                                    />
+                                </div>
+
+                                <div className="p-4 bg-slate-800/30 rounded-2xl border border-slate-700/50">
+                                    <div className="flex items-center justify-between mb-2 text-[11px] text-slate-300">
+                                        <span>Google reCAPTCHA v2</span>
+                                        <span className={captchaResults.recaptchaV2?.value ? 'text-green-400' : 'text-slate-500'}>
+                                            {captchaResults.recaptchaV2?.value ? '✅' : '⏳'}
+                                        </span>
+                                    </div>
+                                    <CaptchaBlock
+                                        siteKey=""
+                                        recaptchaV2SiteKey={recaptchaV2SiteKey}
+                                        enterpriseSiteKey=""
+                                        enterpriseAction={recaptchaEnterpriseAction}
+                                        fallbackText={t.captchaFallback}
+                                        onSolved={handleCaptchaSolved}
+                                    />
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex justify-center p-4 bg-slate-800/30 rounded-2xl border border-slate-700/50">
+                                <CaptchaBlock
+                                    siteKey={captchaMode === "turnstile" ? turnstileSiteKey : captchaMode === "auto" ? turnstileSiteKey : ""}
+                                    recaptchaV2SiteKey={captchaMode === "recaptchaV2" ? recaptchaV2SiteKey : captchaMode === "auto" ? recaptchaV2SiteKey : ""}
+                                    enterpriseSiteKey={captchaMode === "recaptchaEnterprise" ? recaptchaEnterpriseSiteKey : captchaMode === "auto" ? recaptchaEnterpriseSiteKey : ""}
+                                    enterpriseAction={recaptchaEnterpriseAction}
+                                    fallbackText={t.captchaFallback}
+                                    onSolved={handleCaptchaSolved}
+                                />
+                            </div>
+                        )}
                     </div>
 
                     <div className="sticky bottom-0 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] bg-slate-900/80 backdrop-blur-xl rounded-xl">
-                        {captchaResult && captchaResult.value && (
+                        {((captchaMode === 'both' && captchaResults.turnstile?.value && captchaResults.recaptchaV2?.value) || (captchaMode !== 'both' && captchaResult && captchaResult.value)) && (
                             <button
                                 onClick={() => handleVerify()}
-                                disabled={!captchaResult || !captchaResult.value}
+                                disabled={
+                                    captchaMode === 'both'
+                                        ? !(captchaResults.turnstile?.value && captchaResults.recaptchaV2?.value)
+                                        : !(captchaResult && captchaResult.value)
+                                }
                                 className="w-full py-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
                             >
                                 {t.button}
@@ -710,6 +814,7 @@ export default function VerifyPage() {
                     <button onClick={() => {
                         setStep(0);
                         setCaptchaResult(null); // Reset captcha when going back
+                        setCaptchaResults({});
                     }} className="w-full text-xs text-slate-500 hover:text-slate-300 transition">
                         {t.back}
                     </button>
