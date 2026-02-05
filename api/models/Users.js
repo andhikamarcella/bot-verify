@@ -84,10 +84,25 @@ async function getVerifiedUsers(limit = 50) {
     .toArray();
 }
 
+async function setUserLanguage(userId, guildId, language) {
+  const collection = await getCollection();
+  const normalized = String(language || '').toLowerCase();
+  if (normalized !== 'id' && normalized !== 'en') {
+    throw new Error('invalid-language');
+  }
+  await collection.updateOne(
+    { userId: String(userId), guildId: String(guildId) },
+    { $set: { language: normalized }, $setOnInsert: { userId: String(userId), guildId: String(guildId) } },
+    { upsert: true }
+  );
+  return normalized;
+}
+
 module.exports = {
   upsertUserProfile,
   markUserSuspicious,
   getUserProfile,
   clearUserVerification,
   getVerifiedUsers,
+  setUserLanguage,
 };
