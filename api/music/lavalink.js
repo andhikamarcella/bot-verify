@@ -5,11 +5,10 @@ const path = require('path');
 
 // Lavalink configuration
 const LAVALINK_CONFIG = {
-  host: process.env.LAVALINK_HOST || 'vfy.up.railway.app',
-  port: parseInt(process.env.LAVALINK_PORT) || 3001,
-  password: process.env.LAVALINK_PASSWORD || 'youshallnotpass',
-  secure: process.env.LAVALINK_SECURE === 'true',
-  // Add WebSocket path for Railway
+  host: process.env.LAVALINK_HOST || 'localhost',
+  port: parseInt(process.env.LAVALINK_PORT || '2333', 10) || 2333,
+  password: process.env.LAVALINK_PASSWORD || process.env.LAVALINK_SERVER_PASSWORD || 'youshallnotpass',
+  secure: String(process.env.LAVALINK_SECURE || '').toLowerCase() === 'true',
   path: process.env.LAVALINK_PATH || '/v4/websocket',
 };
 
@@ -252,15 +251,7 @@ async function searchYouTube(query) {
       throw new Error('Lavalink not initialized. Please restart bot.');
     }
 
-    // Find any connected node
-    const connectedNode = lavalinkManager.nodes.find(node => node.connected);
-    console.log('[Lavalink] Connected node:', connectedNode?.identifier || 'none');
-    
-    if (!connectedNode) {
-      throw new Error('Lavalink node not connected');
-    }
-
-    const results = await connectedNode.search(query, 'youtube');
+    const results = await lavalinkManager.search(String(query || ''), null);
     console.log('[Lavalink] Search results:', results?.tracks?.length || 0);
     
     if (!results || !results.tracks || results.tracks.length === 0) {
@@ -287,10 +278,10 @@ async function playTrack(guildId, track, interaction = null) {
     let player = lavalinkManager.players.get(guildId);
     if (!player) {
       player = lavalinkManager.create({
-        guildId: guildId,
+        guild: guildId,
         voiceChannel: queue.voiceChannel?.id,
         textChannel: queue.textChannel?.id,
-        volume: queue.volume / 100,
+        volume: queue.volume,
       });
     }
 
@@ -595,6 +586,17 @@ function handleVoiceStateUpdate(oldState, newState) {
   }
 }
 
+function handleRawVoiceEvent(packet) {
+  if (!lavalinkManager) return;
+  const t = packet?.t;
+  if (t !== 'VOICE_STATE_UPDATE' && t !== 'VOICE_SERVER_UPDATE') return;
+  try {
+    lavalinkManager.updateVoiceState(packet);
+  } catch (_) {
+    null;
+  }
+}
+
 module.exports = {
   initializeLavalink,
   musicCommands,
@@ -602,4 +604,5 @@ module.exports = {
   playTrack,
   musicQueue,
   handleVoiceStateUpdate,
+  handleRawVoiceEvent,
 };
