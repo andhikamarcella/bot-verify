@@ -26,7 +26,7 @@ lavalink:
       http: true
       local: false
     ws:
-      path: "/v4/websocket"
+      path: "/"
 
 plugins:
   youtube:
