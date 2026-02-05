@@ -13,17 +13,16 @@ const {
 } = require('@discordjs/voice');
 const prism = require('prism-media');
 const { SlashCommandBuilder } = require('discord.js');
-const { normalizeTtsText } = require('../utils/tts');
+const { createWavBuffer, groqTranscribe, groqTtsWav, requireGroqApiKey, GROQ_API_BASE, getGroqApiKey } = require('../utils/groqAudio');
 
-const GROQ_API_BASE = 'https://api.groq.com/openai/v1';
 const GROQ_CHAT_URL = `${GROQ_API_BASE}/chat/completions`;
 
 const DEFAULT_CHAT_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
-const DEFAULT_STT_MODEL = process.env.GROQ_STT_MODEL || 'whisper-large-v3-turbo';
-const DEFAULT_TTS_MODEL = process.env.GROQ_TTS_MODEL || 'canopylabs/orpheus-v1-english';
-const DEFAULT_TTS_VOICE = process.env.GROQ_TTS_VOICE || 'troy';
 
-const sessions = new Map();
+if (!globalThis.__voicechatSessions) {
+  globalThis.__voicechatSessions = new Map();
+}
+const sessions = globalThis.__voicechatSessions;
 
 if (!globalThis.__voiceConnections) {
   globalThis.__voiceConnections = new Map();
@@ -84,26 +83,8 @@ function normalizeAnswer(raw) {
 
 async function transcribeAudio(audioBuffer) {
   try {
-    const formData = new FormData();
-    const blob = new Blob([audioBuffer], { type: 'audio/wav' });
-    formData.append('file', blob, 'audio.wav');
-    formData.append('model', DEFAULT_STT_MODEL);
-    formData.append('language', process.env.GROQ_STT_LANGUAGE || 'auto');
-
-    const response = await fetch(`${GROQ_API_BASE}/audio/transcriptions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-      },
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Transcription failed: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data.text || '';
+    const sttLang = String(process.env.GROQ_STT_LANGUAGE || '').trim();
+    return await groqTranscribe(audioBuffer, 'voicechat.wav', sttLang || undefined);
   } catch (error) {
     console.error('[VoiceChat] Transcription error:', error);
     return '';
@@ -112,23 +93,7 @@ async function transcribeAudio(audioBuffer) {
 
 async function generateTts(text) {
   try {
-    // Try Groq TTS first
-    const response = await fetch(`${GROQ_API_BASE}/audio/speech`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: DEFAULT_TTS_MODEL,
-        voice: DEFAULT_TTS_VOICE,
-        input: normalizeTtsText(text),
-      }),
-    });
-
-    if (response.ok) {
-      return await response.arrayBuffer();
-    }
+    return await groqTtsWav(text);
   } catch (error) {
     console.error('[VoiceChat] Groq TTS error:', error);
   }
@@ -140,49 +105,62 @@ async function generateTts(text) {
 
 async function chatWithGroq(messages) {
   try {
-    const response = await fetch(GROQ_CHAT_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: DEFAULT_CHAT_MODEL,
-        messages: messages,
-        max_tokens: 1000,
-        temperature: 0.7,
-      }),
-    });
+    const apiKey = requireGroqApiKey();
+    const candidates = [
+      String(DEFAULT_CHAT_MODEL || '').trim(),
+      String(process.env.GROQ_MODEL_FALLBACK || '').trim(),
+      ...String(process.env.GROQ_MODEL_FALLBACKS || '')
+        .split(',')
+        .map((v) => String(v || '').trim())
+        .filter(Boolean),
+      'llama-3.3-70b-versatile',
+      'llama-3.1-70b-versatile',
+      'llama3-70b-8192',
+      'mixtral-8x7b-32768',
+      'gemma2-9b-it',
+    ].filter(Boolean);
 
-    if (!response.ok) {
-      throw new Error(`Chat completion failed: ${response.statusText}`);
+    const unique = Array.from(new Set(candidates));
+    let lastErr = null;
+
+    for (const model of unique) {
+      const response = await fetch(GROQ_CHAT_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages: messages,
+          max_tokens: 1000,
+          temperature: 0.7,
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        lastErr = new Error(`chat-failed:${response.status}:${errText.slice(0, 200)}`);
+        if (response.status === 400 || response.status === 404) {
+          const lower = errText.toLowerCase();
+          if (lower.includes('model') || lower.includes('not found') || lower.includes('invalid') || lower.includes('unknown')) {
+            continue;
+          }
+        }
+        throw lastErr;
+      }
+
+      const data = await response.json().catch(() => null);
+      const content = data?.choices?.[0]?.message?.content;
+      if (content) return content;
+      lastErr = new Error('empty-response');
     }
 
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || 'Sorry, I could not process your request.';
+    throw lastErr || new Error('chat-failed');
   } catch (error) {
     console.error('[VoiceChat] Chat error:', error);
     return 'Sorry, I encountered an error while processing your request.';
   }
-}
-
-function createWavBuffer(pcmBuffer, sampleRate = 48000, channels = 1) {
-  const dataLength = pcmBuffer.length;
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + dataLength, 4);
-  header.write('WAVE', 8);
-  header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(channels, 22);
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(sampleRate * channels * 2, 28);
-  header.writeUInt16LE(channels * 2, 32);
-  header.writeUInt16LE(16, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(dataLength, 40);
-  return Buffer.concat([header, pcmBuffer]);
 }
 
 module.exports = {
@@ -217,6 +195,11 @@ module.exports = {
         await interaction.reply({ content: 'Command ini hanya bisa dipakai di server.', flags: 64 });
         return;
       }
+      const session = sessions.get(guild.id);
+      if (session?.cleanup) {
+        try { session.cleanup(); } catch (_) {}
+        try { sessions.delete(guild.id); } catch (_) {}
+      }
       const map = globalThis.__voiceConnections;
       const { getVoiceConnection } = require('@discordjs/voice');
       const connection = map.get(guild.id) || getVoiceConnection(guild.id);
@@ -240,6 +223,7 @@ module.exports = {
     }
 
     try {
+      requireGroqApiKey();
       await interaction.deferReply();
 
       const connection = joinVoiceChannel({
@@ -272,10 +256,7 @@ module.exports = {
       const ttsAudio = await generateTts(welcomeText);
 
       if (ttsAudio) {
-        const resource = createAudioResource(Buffer.from(ttsAudio), {
-          inputType: 'arbitrary',
-          inlineVolume: true,
-        });
+        const resource = createAudioResource(Readable.from(ttsAudio));
         player.play(resource);
       } else {
         // Fallback: Send text message instead
@@ -337,10 +318,7 @@ module.exports = {
               const responseTts = await generateTts(aiResponse);
               
               if (responseTts) {
-                const responseResource = createAudioResource(Buffer.from(responseTts), {
-                  inputType: 'arbitrary',
-                  inlineVolume: true,
-                });
+                const responseResource = createAudioResource(Readable.from(responseTts));
                 player.play(responseResource);
               }
 
@@ -365,9 +343,10 @@ module.exports = {
       setTimeout(listenForSpeech, 3000);
 
       // Store session for cleanup
-      sessions.set(interaction.user.id, {
+      sessions.set(guild.id, {
         connection,
         player,
+        userId,
         cleanup: () => {
           try {
             connection.destroy();
