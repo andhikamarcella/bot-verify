@@ -58,6 +58,10 @@ module.exports = {
             '`/voiceverify start|stop` • Verifikasi via voice (eksperimental)\n' +
             '`/say <text>` • (Staff) Join voice & bicara (TTS)\n' +
             '`/dis` • (Staff) Disconnect dari voice\n' +
+            '`/status` • Cek kesehatan bot (DB/Groq/URL)\n' +
+            '`/rules` • Lihat rules server\n' +
+            '`/resend` • Kirim ulang link verifikasi ke DM\n' +
+            '`/language` • Set bahasa DM (ID/EN)\n' +
             '`/ping` • Cek latensi bot\n' +
             '`/userinfo [user]` • Lihat info user & nickname',
         }
