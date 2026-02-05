@@ -22,6 +22,8 @@ const DEFAULT_CONFIG = {
   settingsUpdatedAt: null,
   maintenanceMode: false,
   maintenanceReason: "System upgrade in progress",
+  rulesChannelId: null,
+  rulesUrl: null,
 };
 
 async function getCollection() {
