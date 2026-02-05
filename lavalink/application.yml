@@ -6,30 +6,42 @@ server:
   port: 2333
 
 lavalink:
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.17.0"
+      snapshot: false
   server:
     password: "youshallnotpass"
+    sources:
+      youtube: false
+      bandcamp: true
+      soundcloud: true
+      twitch: true
+      vimeo: true
+      http: true
+      local: false
+    ws:
+      path: "/v4/websocket"
 
 spring:
   main:
     banner-mode: off
 
-# YouTube source plugin configuration
 plugins:
-  - youtube:
-      enabled: true
-      allowSearch: true
-      allowDirectVideoIds: true
-      allowDirectPlaylistIds: true
-      clients:
-        - MUSIC
-        - ANDROID_VR
-        - WEB
-        - WEBEMBED
-        - WEB_REMIX
-        - TVHTML5
-        - TVHTML5_EMBED
-        - ANDROID
-        - IOS
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    clients:
+      - MUSIC
+      - ANDROID_VR
+      - WEB
+      - WEBEMBED
+      - WEB_REMIX
+      - TVHTML5
+      - TVHTML5_EMBED
+      - ANDROID
+      - IOS
 
 # Buffer settings
 bufferDurationMs: 400
@@ -45,10 +57,9 @@ opusEncoding:
   sampleRate: 48000
   channels: 2
 
-# YouTube API key (optional but recommended)
-# Get from: https://console.developers.google.com/
+# Optional (recommended): YouTube Data API key to improve search reliability
 youtube:
-  apiKey: "AIzaSyAN6ecNTVFGLm4R-83H4qm7VsFsbpzpMRY"
+  apiKey: ""
 
 # Track loading settings
 sourceResolving:
