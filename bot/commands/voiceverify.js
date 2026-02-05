@@ -1,6 +1,3 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const { Readable } = require('stream');
 const {
   joinVoiceChannel,
@@ -11,17 +8,8 @@ const {
   VoiceConnectionStatus,
   EndBehaviorType,
 } = require('@discordjs/voice');
-const prism = require('prism-media');
 const { SlashCommandBuilder } = require('discord.js');
-const { normalizeTtsText } = require('../utils/tts');
-
-const GROQ_API_BASE = 'https://api.groq.com/openai/v1';
-const GROQ_CHAT_URL = `${GROQ_API_BASE}/chat/completions`;
-
-const DEFAULT_CHAT_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
-const DEFAULT_STT_MODEL = process.env.GROQ_STT_MODEL || 'whisper-large-v3-turbo';
-const DEFAULT_TTS_MODEL = process.env.GROQ_TTS_MODEL || 'canopylabs/orpheus-v1-english';
-const DEFAULT_TTS_VOICE = process.env.GROQ_TTS_VOICE || 'troy';
+const { groqTtsWav, groqTranscribe, recordUserToWav, recordUserToWavBuffer, requireGroqApiKey } = require('../utils/groqAudio');
 
 const VOICEVERIFY_DIGITS = process.env.VOICEVERIFY_DIGITS || 3;
 const VOICEVERIFY_MAX_ATTEMPTS = process.env.VOICEVERIFY_MAX_ATTEMPTS || 3;
@@ -64,7 +52,12 @@ function normalizeAnswer(raw) {
     five: '5', six: '6', seven: '7', eight: '8', nine: '9',
     ten: '10', eleven: '11', twelve: '12', thirteen: '13', fourteen: '14',
     fifteen: '15', sixteen: '16', seventeen: '17', eighteen: '18', nineteen: '19',
-    twenty: '20'
+    twenty: '20',
+    nol: '0', satu: '1', dua: '2', tiga: '3', empat: '4',
+    lima: '5', enam: '6', tujuh: '7', delapan: '8', sembilan: '9',
+    sepuluh: '10', sebelas: '11', 'dua belas': '12', 'tiga belas': '13', 'empat belas': '14',
+    'lima belas': '15', 'enam belas': '16', 'tujuh belas': '17', 'delapan belas': '18', 'sembilan belas': '19',
+    'dua puluh': '20',
   };
 
   const words = text.split(/\s+/);
@@ -76,79 +69,6 @@ function normalizeAnswer(raw) {
   }
 
   return digits;
-}
-
-async function transcribeAudio(audioBuffer) {
-  try {
-    const formData = new FormData();
-    const blob = new Blob([audioBuffer], { type: 'audio/wav' });
-    formData.append('file', blob, 'audio.wav');
-    formData.append('model', DEFAULT_STT_MODEL);
-    formData.append('language', process.env.GROQ_STT_LANGUAGE || 'auto');
-
-    const response = await fetch(`${GROQ_API_BASE}/audio/transcriptions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-      },
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Transcription failed: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data.text || '';
-  } catch (error) {
-    console.error('[VoiceVerify] Transcription error:', error);
-    return '';
-  }
-}
-
-async function generateTts(text) {
-  try {
-    const response = await fetch(`${GROQ_API_BASE}/audio/speech`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: DEFAULT_TTS_MODEL,
-        voice: DEFAULT_TTS_VOICE,
-        input: normalizeTtsText(text),
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`TTS generation failed: ${response.statusText}`);
-    }
-
-    return await response.arrayBuffer();
-  } catch (error) {
-    console.error('[VoiceVerify] TTS error:', error);
-    return null;
-  }
-}
-
-function createWavBuffer(pcmBuffer, sampleRate = 48000, channels = 1) {
-  const dataLength = pcmBuffer.length;
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + dataLength, 4);
-  header.write('WAVE', 8);
-  header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(channels, 22);
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(sampleRate * channels * 2, 28);
-  header.writeUInt16LE(channels * 2, 32);
-  header.writeUInt16LE(16, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(dataLength, 40);
-  return Buffer.concat([header, pcmBuffer]);
 }
 
 async function assignRole(member, roleId, reason) {
@@ -189,7 +109,24 @@ async function sendVerificationLog(client, guildId, logData) {
   }
 }
 
+function sanitizeEnvString(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^[`"']+/, '')
+    .replace(/[`"']+$/, '')
+    .trim();
+}
+
+function sanitizeUrlBase(value) {
+  const cleaned = sanitizeEnvString(value);
+  return cleaned ? cleaned.replace(/\/+$/, '') : '';
+}
+
 module.exports = {
+  groqTtsWav,
+  groqTranscribe,
+  recordUserToWav,
+  recordUserToWavBuffer,
   data: new SlashCommandBuilder()
     .setName('voiceverify')
     .setDescription('Verifikasi menggunakan suara')
@@ -255,6 +192,7 @@ module.exports = {
     const maxAttempts = VOICEVERIFY_MAX_ATTEMPTS;
 
     try {
+      requireGroqApiKey();
       await interaction.deferReply();
 
       const connection = joinVoiceChannel({
@@ -262,7 +200,7 @@ module.exports = {
         guildId: guild.id,
         adapterCreator: guild.voiceAdapterCreator,
         selfDeaf: false,
-        selfMute: true,
+        selfMute: false,
       });
       try { globalThis.__voiceConnections.set(guild.id, connection); } catch (_) {}
 
@@ -270,20 +208,17 @@ module.exports = {
       connection.subscribe(player);
 
       // Generate TTS for the challenge
-      const ttsAudio = await generateTts(
-        `Voice verification started. Please say the following digits clearly: ${expectedWithHyphens}. You have ${maxAttempts} attempts.`
-      );
-
-      if (ttsAudio) {
-        const resource = createAudioResource(Buffer.from(ttsAudio), {
-          inputType: 'arbitrary',
-          inlineVolume: true,
-        });
+      try {
+        const wav = await groqTtsWav(
+          `Voice verification started. Please say the following digits clearly: ${expectedWithHyphens}. You have ${maxAttempts} attempts.`,
+          'en'
+        );
+        const resource = createAudioResource(Readable.from(wav));
         player.play(resource);
+      } catch (_) {
+        null;
       }
 
-      // Create audio receiver
-      const receiver = connection.receiver;
       const userId = interaction.user.id;
 
       const listenForVerification = async () => {
@@ -306,25 +241,14 @@ module.exports = {
         }
 
         try {
-          const opusStream = receiver.subscribe(userId, {
-            end: {
-              behavior: EndBehaviorType.AfterSilence,
-              duration: VOICEVERIFY_SILENCE_MS,
-            },
+          const wavBuffer = await recordUserToWavBuffer(connection, userId, {
+            silenceMs: VOICEVERIFY_SILENCE_MS,
+            maxRecordMs: VOICEVERIFY_MAX_RECORD_MS,
           });
 
-          const decoder = new prism.opus.Decoder({ rate: 48000, channels: 1, frameSize: 960 });
-          const pcmChunks = [];
-          const pcmStream = opusStream.pipe(decoder);
-          for await (const chunk of pcmStream) {
-            pcmChunks.push(chunk);
-          }
-
-          if (pcmChunks.length > 0) {
-            const pcmBuffer = Buffer.concat(pcmChunks);
-            const wavBuffer = createWavBuffer(pcmBuffer, 48000, 1);
-            
-            const transcription = await transcribeAudio(wavBuffer);
+          if (wavBuffer.length > 44) {
+            const sttLang = String(process.env.GROQ_STT_LANGUAGE || '').trim();
+            const transcription = await groqTranscribe(wavBuffer, 'voiceverify.wav', sttLang || undefined);
             const normalizedAnswer = normalizeAnswer(transcription);
             
             if (normalizedAnswer === expectedDigits) {
@@ -332,14 +256,13 @@ module.exports = {
               const roleAssigned = await assignRole(member, memberRoleId, 'Voice verification passed');
               
               if (roleAssigned) {
-                const successTts = await generateTts('Verification successful! Welcome to the server.');
-                
-                if (successTts) {
-                  const successResource = createAudioResource(Buffer.from(successTts), {
-                    inputType: 'arbitrary',
-                    inlineVolume: true,
-                  });
+                try {
+                  const successWav = await groqTtsWav('Verification successful! Welcome to the server.', 'en');
+                  const successResource = createAudioResource(Readable.from(successWav));
                   player.play(successResource);
+                  await entersState(player, AudioPlayerStatus.Idle, 60_000).catch(() => null);
+                } catch (_) {
+                  null;
                 }
 
                 await interaction.followUp({
@@ -355,7 +278,10 @@ module.exports = {
 
                 // Try to create interview token
                 try {
-                  const baseUrl = process.env.PUBLIC_FRONTEND_URL || process.env.FRONTEND_BASE || 'http://localhost:3000';
+                  const baseUrl =
+                    sanitizeUrlBase(process.env.PUBLIC_FRONTEND_URL) ||
+                    sanitizeUrlBase(process.env.FRONTEND_BASE) ||
+                    'http://localhost:3000';
                   
                   // Dynamic require with fallback for deployment environment
                   let tokensModel;
@@ -403,16 +329,15 @@ module.exports = {
               const remainingAttempts = maxAttempts - attempts;
               
               if (remainingAttempts > 0) {
-                const retryTts = await generateTts(
-                  `That was incorrect. Expected: ${expectedWithHyphens}. You have ${remainingAttempts} attempts remaining. Please try again.`
-                );
-                
-                if (retryTts) {
-                  const retryResource = createAudioResource(Buffer.from(retryTts), {
-                    inputType: 'arbitrary',
-                    inlineVolume: true,
-                  });
+                try {
+                  const retryWav = await groqTtsWav(
+                    `That was incorrect. Expected: ${expectedWithHyphens}. You have ${remainingAttempts} attempts remaining. Please try again.`,
+                    'en'
+                  );
+                  const retryResource = createAudioResource(Readable.from(retryWav));
                   player.play(retryResource);
+                } catch (_) {
+                  null;
                 }
 
                 await interaction.followUp({
@@ -439,16 +364,15 @@ module.exports = {
             const remainingAttempts = maxAttempts - attempts;
             
             if (remainingAttempts > 0) {
-              const noAudioTts = await generateTts(
-                `No audio detected. Please speak clearly. You have ${remainingAttempts} attempts remaining.`
-              );
-              
-              if (noAudioTts) {
-                const noAudioResource = createAudioResource(Buffer.from(noAudioTts), {
-                  inputType: 'arbitrary',
-                  inlineVolume: true,
-                });
+              try {
+                const noAudioWav = await groqTtsWav(
+                  `No audio detected. Please speak clearly. You have ${remainingAttempts} attempts remaining.`,
+                  'en'
+                );
+                const noAudioResource = createAudioResource(Readable.from(noAudioWav));
                 player.play(noAudioResource);
+              } catch (_) {
+                null;
               }
 
               await interaction.followUp({
