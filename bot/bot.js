@@ -1015,6 +1015,15 @@ client.on(Events.GuildMemberAdd, (member) => {
   });
 });
 
+client.on('raw', (packet) => {
+  try {
+    const { handleRawVoiceEvent } = require('../api/music/lavalink');
+    handleRawVoiceEvent(packet);
+  } catch (_) {
+    null;
+  }
+});
+
 // Handle voice state updates for Lavalink
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   try {
