@@ -64,6 +64,8 @@ const { upsertUserProfile } = usersModel;
 const { insertLog } = verificationLogModel;
 const { hashIp } = require('../lib/hashIp');
 const { verifyTurnstile } = require('../lib/turnstile');
+const { verifyRecaptcha } = require('../lib/recaptcha');
+const { verifyRecaptchaEnterprise } = require('../lib/recaptchaEnterprise');
 const { getExtraRolesForUser } = require('../lib/roleSync');
 const { connectMongo } = require('../lib/db');
 const { getGuildConfig } = guildConfigModel;
@@ -82,8 +84,21 @@ const router = express.Router();
 const GUILD_ID = process.env.GUILD_ID;
 const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;
 const WELCOME_CHANNEL_ID = process.env.WELCOME_CHANNEL_ID;
-const FRONTEND_URL = process.env.PUBLIC_FRONTEND_URL || '';
-const DISCORD_BROWSER_URL = process.env.DISCORD_BROWSER_URL || null;
+function sanitizeEnvString(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^[`"']+/, '')
+    .replace(/[`"']+$/, '')
+    .trim();
+}
+
+function sanitizeUrlBase(value) {
+  const cleaned = sanitizeEnvString(value);
+  return cleaned ? cleaned.replace(/\/+$/, '') : '';
+}
+
+const FRONTEND_URL = sanitizeUrlBase(process.env.PUBLIC_FRONTEND_URL);
+const DISCORD_BROWSER_URL = sanitizeEnvString(process.env.DISCORD_BROWSER_URL) || null;
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '';
 
 function renderNicknameTemplate(template, context) {
@@ -312,7 +327,7 @@ router.post('/regenerate-token', async (req, res) => {
 
 router.post('/verify', async (req, res) => {
   try {
-    const { token, captchaResult, ip: bodyIp, country, profile: submittedProfile } = req.body || {};
+    const { token, captchaResult, captchaResults, ip: bodyIp, country, profile: submittedProfile } = req.body || {};
     if (!token) {
       return res.status(400).json({ ok: false, error: 'missing-token' });
     }
@@ -362,63 +377,117 @@ router.post('/verify', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'token-expired' });
     }
 
-    // Turnstile Verification
-    let captchaOk = false;
+    const normalizedCaptchaResults = Array.isArray(captchaResults)
+      ? captchaResults
+      : captchaResult
+        ? [captchaResult]
+        : [];
+
+    let captchaOk = true;
     let captchaError = null;
     
     console.log('[Verify] Starting captcha validation', {
-      type: captchaResult?.type,
-      hasValue: !!captchaResult?.value,
-      valueLength: captchaResult?.value?.length,
-      hasSecretKey: !!TURNSTILE_SECRET_KEY,
-      secretKeyLength: TURNSTILE_SECRET_KEY?.length,
-      secretKeyPrefix: TURNSTILE_SECRET_KEY ? TURNSTILE_SECRET_KEY.substring(0, 15) + '...' : 'MISSING',
+      types: normalizedCaptchaResults.map((item) => item?.type).filter(Boolean),
+      count: normalizedCaptchaResults.length,
+      hasTurnstileSecretKey: Boolean(TURNSTILE_SECRET_KEY),
       ip: bodyIp || req.ip,
-      userAgent: req.get('user-agent')?.substring(0, 50)
+      userAgent: req.get('user-agent')?.substring(0, 50),
     });
 
-    if (captchaResult?.type === 'turnstile') {
-      if (!captchaResult.value || captchaResult.value.trim() === '') {
-        console.error('[Verify] Turnstile token is empty');
-        captchaError = 'Token is empty';
-        captchaOk = false;
-      } else if (!TURNSTILE_SECRET_KEY || TURNSTILE_SECRET_KEY.trim() === '') {
-        console.error('[Verify] TURNSTILE_SECRET_KEY is not set in environment variables!');
-        console.error('[Verify] Please check your Railway/Vercel environment variables');
-        captchaError = 'Secret key not configured';
-        captchaOk = false;
-      } else if (TURNSTILE_SECRET_KEY.length < 20) {
-        console.error('[Verify] TURNSTILE_SECRET_KEY seems too short:', TURNSTILE_SECRET_KEY.length);
-        captchaError = 'Secret key invalid format';
-        captchaOk = false;
-      } else {
-        console.log('[Verify] Calling verifyTurnstile with token length:', captchaResult.value.length);
-        captchaOk = await verifyTurnstile(captchaResult.value, TURNSTILE_SECRET_KEY, bodyIp || req.ip);
-        if (!captchaOk) {
-          captchaError = 'Cloudflare validation failed';
-        }
-      }
-    } else if (captchaResult?.type === 'fallbackEmoji') {
-      // Check if strict mode is enabled
-      const TURNSTILE_STRICT = process.env.TURNSTILE_STRICT === 'true';
-      if (TURNSTILE_STRICT) {
-        console.error('[Verify] TURNSTILE_STRICT is enabled, fallback emoji not allowed');
-        captchaError = 'Turnstile required (strict mode)';
-        captchaOk = false;
-      } else {
-        captchaOk = captchaResult.value === 'ok';
-        console.log('[Verify] Using fallback emoji captcha', { ok: captchaOk });
-      }
-    } else {
-      console.error('[Verify] Unknown captcha type:', captchaResult?.type);
-      captchaError = 'Unknown captcha type';
+    if (normalizedCaptchaResults.length === 0) {
       captchaOk = false;
+      captchaError = 'missing-captcha';
+    } else {
+      for (const item of normalizedCaptchaResults) {
+        const type = item?.type;
+        const value = String(item?.value || '');
+        if (!type) {
+          captchaOk = false;
+          captchaError = 'missing-captcha-type';
+          break;
+        }
+        if (!value || value.trim() === '') {
+          captchaOk = false;
+          captchaError = 'missing-captcha-token';
+          break;
+        }
+
+        if (type === 'turnstile') {
+          if (!TURNSTILE_SECRET_KEY || TURNSTILE_SECRET_KEY.trim() === '') {
+            captchaOk = false;
+            captchaError = 'turnstile-secret-not-configured';
+            break;
+          }
+          if (TURNSTILE_SECRET_KEY.length < 20) {
+            captchaOk = false;
+            captchaError = 'turnstile-secret-invalid';
+            break;
+          }
+          const ok = await verifyTurnstile(value, TURNSTILE_SECRET_KEY, bodyIp || req.ip);
+          if (!ok) {
+            captchaOk = false;
+            captchaError = 'turnstile-failed';
+            break;
+          }
+          continue;
+        }
+
+        if (type === 'recaptchaV2') {
+          const secret = String(process.env.RECAPTCHA_SECRET_KEY || '').trim();
+          const v2 = await verifyRecaptcha(value, secret, bodyIp || req.ip).catch((e) => ({
+            ok: false,
+            reason: String(e?.message || 'recaptcha-v2-failed'),
+          }));
+          if (!v2?.ok) {
+            captchaOk = false;
+            captchaError = String(v2?.reason || 'recaptcha-v2-failed');
+            break;
+          }
+          continue;
+        }
+
+        if (type === 'recaptchaEnterprise') {
+          const assessment = await verifyRecaptchaEnterprise({
+            token: value,
+            expectedAction: String(item?.action || ''),
+            siteKey: String(process.env.RECAPTCHA_ENTERPRISE_SITE_KEY || ''),
+            ip: bodyIp || req.ip,
+            userAgent: req.get('user-agent') || '',
+          }).catch((e) => ({ ok: false, reason: String(e?.message || 'recaptcha-enterprise-failed') }));
+          if (!assessment?.ok) {
+            captchaOk = false;
+            captchaError = String(assessment?.reason || 'recaptcha-enterprise-failed');
+            break;
+          }
+          continue;
+        }
+
+        if (type === 'fallbackEmoji') {
+          const TURNSTILE_STRICT = process.env.TURNSTILE_STRICT === 'true';
+          if (TURNSTILE_STRICT) {
+            captchaOk = false;
+            captchaError = 'fallback-not-allowed';
+            break;
+          }
+          const ok = value === 'ok';
+          if (!ok) {
+            captchaOk = false;
+            captchaError = 'fallback-failed';
+            break;
+          }
+          continue;
+        }
+
+        captchaOk = false;
+        captchaError = `unknown-captcha-type:${type}`;
+        break;
+      }
     }
 
     console.log('[Verify] Captcha validation result:', { 
       ok: captchaOk, 
       error: captchaError,
-      type: captchaResult?.type 
+      types: normalizedCaptchaResults.map((item) => item?.type).filter(Boolean),
     });
 
     if (!captchaOk) {
