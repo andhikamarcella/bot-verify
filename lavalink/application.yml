@@ -11,6 +11,8 @@ spring:
       enabled: false
       import-check:
         enabled: false
+  main:
+    banner-mode: off
 
 lavalink:
   plugins:
@@ -28,10 +30,6 @@ lavalink:
       local: false
     ws:
       path: "/v4/websocket"
-
-spring:
-  main:
-    banner-mode: off
 
 plugins:
   youtube:
