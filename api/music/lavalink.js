@@ -3,13 +3,35 @@ const { Manager } = require('erela.js');
 const fs = require('fs');
 const path = require('path');
 
+function cleanEnv(value) {
+  if (value === undefined || value === null) return '';
+  let v = String(value).trim();
+  if (
+    (v.startsWith('"') && v.endsWith('"')) ||
+    (v.startsWith("'") && v.endsWith("'")) ||
+    (v.startsWith('`') && v.endsWith('`'))
+  ) {
+    v = v.slice(1, -1).trim();
+  }
+  return v;
+}
+
+function cleanPath(value) {
+  const v = cleanEnv(value);
+  if (!v) return '';
+  return v.startsWith('/') ? v : `/${v}`;
+}
+
 // Lavalink configuration
 const LAVALINK_CONFIG = {
-  host: process.env.LAVALINK_HOST || 'localhost',
-  port: parseInt(process.env.LAVALINK_PORT || '2333', 10) || 2333,
-  password: process.env.LAVALINK_PASSWORD || process.env.LAVALINK_SERVER_PASSWORD || 'youshallnotpass',
-  secure: String(process.env.LAVALINK_SECURE || '').toLowerCase() === 'true',
-  path: process.env.LAVALINK_PATH || '/v4/websocket',
+  host: cleanEnv(process.env.LAVALINK_HOST) || 'localhost',
+  port: parseInt(cleanEnv(process.env.LAVALINK_PORT) || '2333', 10) || 2333,
+  password:
+    cleanEnv(process.env.LAVALINK_PASSWORD) ||
+    cleanEnv(process.env.LAVALINK_SERVER_PASSWORD) ||
+    'youshallnotpass',
+  secure: String(cleanEnv(process.env.LAVALINK_SECURE) || '').toLowerCase() === 'true',
+  path: cleanPath(process.env.LAVALINK_PATH) || '/v4/websocket',
 };
 
 // Music queue management
@@ -113,20 +135,32 @@ async function _doInitialize(client) {
     secure: LAVALINK_CONFIG.secure,
     hasPassword: !!LAVALINK_CONFIG.password
   });
+  console.log(
+    '[Lavalink] URL:',
+    `${LAVALINK_CONFIG.secure ? 'wss' : 'ws'}://${LAVALINK_CONFIG.host}:${LAVALINK_CONFIG.port}${LAVALINK_CONFIG.path}`
+  );
 
   // Store the client for emergency use
   discordClient = client;
 
-  const manager = new Manager({
-    nodes: [
-      {
-        identifier: 'main',
-        host: LAVALINK_CONFIG.host,
-        port: LAVALINK_CONFIG.port,
-        password: LAVALINK_CONFIG.password,
-        secure: Boolean(LAVALINK_CONFIG.secure),
-        path: LAVALINK_CONFIG.path,
-      },
+  const isLocalHost =
+    LAVALINK_CONFIG.host === 'localhost' ||
+    LAVALINK_CONFIG.host === '127.0.0.1' ||
+    LAVALINK_CONFIG.host === '0.0.0.0';
+
+  const nodes = [
+    {
+      identifier: 'main',
+      host: LAVALINK_CONFIG.host,
+      port: LAVALINK_CONFIG.port,
+      password: LAVALINK_CONFIG.password,
+      secure: Boolean(LAVALINK_CONFIG.secure),
+      path: LAVALINK_CONFIG.path,
+    },
+  ];
+
+  if (isLocalHost) {
+    nodes.push(
       {
         identifier: 'fallback-2333',
         host: LAVALINK_CONFIG.host,
@@ -143,7 +177,11 @@ async function _doInitialize(client) {
         secure: false,
         path: LAVALINK_CONFIG.path,
       }
-    ],
+    );
+  }
+
+  const manager = new Manager({
+    nodes,
     send: (payload) => {
       if (client.shard) {
         client.shard.send(payload);
@@ -169,7 +207,8 @@ async function _doInitialize(client) {
   });
 
   manager.on('nodeError', (node, error) => {
-    console.error(`🚨 [Lavalink] Node ${node.identifier} error:`, error.message);
+    const nodeId = node?.identifier || node?.options?.identifier || 'unknown';
+    console.error(`🚨 [Lavalink] Node ${nodeId} error:`, error?.message || String(error));
   });
 
   manager.on('trackStart', (player, track) => {
