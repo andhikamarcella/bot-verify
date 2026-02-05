@@ -2,13 +2,14 @@ const express = require('express');
 const cors = require('cors');
 
 // Dynamic require with fallback for deployment environment
-let verifyRoutes, dashboardRoutes, guildInfoRoutes, leaderboardRoutes;
+let verifyRoutes, dashboardRoutes, guildInfoRoutes, leaderboardRoutes, recaptchaEnterpriseRoutes;
 
 try {
   verifyRoutes = require('./routes/verify');
   dashboardRoutes = require('./routes/dashboard');
   guildInfoRoutes = require('./routes/guildInfo');
   leaderboardRoutes = require('./routes/leaderboard');
+  recaptchaEnterpriseRoutes = require('./routes/recaptchaEnterprise');
 } catch (error) {
   console.error('[API] Failed to load routes from relative paths, trying absolute paths...');
   try {
@@ -16,6 +17,7 @@ try {
     dashboardRoutes = require('/app/api/routes/dashboard');
     guildInfoRoutes = require('/app/api/routes/guildInfo');
     leaderboardRoutes = require('/app/api/routes/leaderboard');
+    recaptchaEnterpriseRoutes = require('/app/api/routes/recaptchaEnterprise');
   } catch (absError) {
     console.error('[API] Failed to load routes from absolute paths:', absError);
     throw new Error('Cannot load API routes');
@@ -43,6 +45,7 @@ app.use('/api', verifyRoutes);
 app.use('/api', dashboardRoutes);
 app.use('/api', guildInfoRoutes);
 app.use('/api', leaderboardRoutes);
+app.use('/api', recaptchaEnterpriseRoutes);
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'verification-api' });
