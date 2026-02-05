@@ -55,8 +55,22 @@ const {
   hasNonEveryoneRole,
   isStaffMember,
 } = require('../utils/permissions');
+const { detectLangFromInteraction } = require('../utils/i18n');
 
-const FRONTEND_BASE = (process.env.PUBLIC_FRONTEND_URL || '').replace(/\/$/, '');
+function sanitizeEnvString(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^[`"']+/, '')
+    .replace(/[`"']+$/, '')
+    .trim();
+}
+
+function sanitizeUrlBase(value) {
+  const cleaned = sanitizeEnvString(value);
+  return cleaned ? cleaned.replace(/\/+$/, '') : '';
+}
+
+const FRONTEND_BASE = sanitizeUrlBase(process.env.PUBLIC_FRONTEND_URL);
 const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID;
 
 async function ensureMongo() {
@@ -67,15 +81,20 @@ function ensureAdmin(interaction) {
   ensureStaff(interaction);
 }
 
-async function sendVerificationDm(user, url) {
+async function sendVerificationDm(user, url, lang) {
+  const isEn = lang === 'en';
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setLabel('Verify Me').setStyle(ButtonStyle.Link).setURL(url)
+    new ButtonBuilder().setLabel(isEn ? 'Verify Me' : 'Verifikasi Sekarang').setStyle(ButtonStyle.Link).setURL(url)
   );
   const message = await user.send({
     content: [
-      'Halo! Klik tombol di bawah untuk memulai verifikasi.',
+      isEn ? 'Hey! Quick verification steps:' : 'Hai! Ini langkah verifikasi yang gampang:',
       '',
-      'Kalau tombol tidak muncul / tidak bisa diklik, gunakan link ini:',
+      isEn ? 'Step 1 → Click the button below' : 'Step 1 → Klik tombol di bawah',
+      isEn ? 'Step 2 → Complete captcha on the website' : 'Step 2 → Selesaikan captcha di website',
+      isEn ? 'Done → You will get access automatically' : 'Selesai → Kamu akan dapat akses otomatis',
+      '',
+      isEn ? 'If the button does not work, use this link:' : 'Kalau tombol tidak muncul / tidak bisa diklik, gunakan link ini:',
       url,
     ].join('\n'),
     components: [row],
@@ -105,7 +124,7 @@ async function handleStart(interaction) {
 
   if (!FRONTEND_BASE) {
     await interaction.reply({
-      content: 'Konfigurasi FRONTEND belum tersedia. Hubungi admin.',
+      content: 'Konfigurasi frontend belum tersedia. Hubungi admin.',
       flags: 64,
     });
     return;
@@ -178,8 +197,14 @@ async function handleStart(interaction) {
     // ignore
   }
 
+  const profile = await getUserProfile(interaction.user.id, interaction.guildId).catch(() => null);
+  const lang =
+    profile?.language && (profile.language === 'en' || profile.language === 'id')
+      ? profile.language
+      : detectLangFromInteraction(interaction, 'id');
+
   try {
-    const dmMessage = await sendVerificationDm(interaction.user, verifyUrl);
+    const dmMessage = await sendVerificationDm(interaction.user, verifyUrl, lang);
     if (dmMessage?.channel?.id && dmMessage?.id) {
       await setTokenStatus(token, 'PENDING', {
         dmChannelId: dmMessage.channel.id,
@@ -189,15 +214,16 @@ async function handleStart(interaction) {
   } catch (err) {
     console.error('Gagal mengirim DM verifikasi', err);
     await interaction.reply({
-      content:
-        'Tidak dapat mengirim DM. Tolong buka DM kamu dan jalankan /verify start lagi atau gunakan panel verifikasi.',
+      content: lang === 'en'
+        ? "I can't DM you. Please enable DMs and run /verify start again, or use the verification panel."
+        : 'Tidak dapat mengirim DM. Tolong buka DM kamu lalu jalankan /verify start lagi atau gunakan panel verifikasi.',
       flags: 64,
     });
     return;
   }
 
   await interaction.reply({
-    content: 'Link verifikasi sudah dikirim ke DM kamu. Cek DM ya! ✅',
+    content: lang === 'en' ? 'Verification link sent via DM. Please check your DMs. ✅' : 'Link verifikasi sudah dikirim ke DM kamu. Cek DM ya! ✅',
     flags: 64,
   });
 }
