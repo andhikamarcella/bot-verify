@@ -8,6 +8,13 @@ server:
   http2:
     enabled: false
 
+spring:
+  cloud:
+    config:
+      enabled: false
+      import-check:
+        enabled: false
+
 # Lavalink server password
 lavalink:
   plugins:
