@@ -24,8 +24,6 @@ async function verifyTurnstile(token, secret, ip) {
     tokenLength: token.length,
     tokenPrefix: token.substring(0, 20) + '...',
     hasSecret: !!secret,
-    secretPrefix: secret.substring(0, 10) + '...',
-    secretLength: secret.length,
     ip: ip || 'not provided',
     timestamp: new Date().toISOString()
   });
