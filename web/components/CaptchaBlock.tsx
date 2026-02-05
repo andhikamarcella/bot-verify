@@ -3,16 +3,33 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
 interface CaptchaBlockProps {
-  onSolved: (result: { type: 'turnstile' | 'fallbackEmoji'; value: string }) => void;
+  onSolved: (result: { type: 'turnstile' | 'recaptchaV2' | 'recaptchaEnterprise' | 'fallbackEmoji'; value: string; action?: string }) => void;
   siteKey: string;
+  recaptchaV2SiteKey?: string;
+  enterpriseSiteKey?: string;
+  enterpriseAction?: string;
   fallbackText?: string;
 }
 
 const FALLBACK_EMOJIS = ['🍉', '🍓', '🍍', '🍇', '🥝'];
 
-export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {emoji} untuk lanjut.' }: CaptchaBlockProps) {
+export function CaptchaBlock({
+  onSolved,
+  siteKey,
+  recaptchaV2SiteKey,
+  enterpriseSiteKey,
+  enterpriseAction,
+  fallbackText = 'Klik emoji {emoji} untuk lanjut.',
+}: CaptchaBlockProps) {
   const [useFallback, setUseFallback] = useState(false);
   const [targetEmoji, setTargetEmoji] = useState<string>('🍉');
+  const [recaptchaReady, setRecaptchaReady] = useState(false);
+  const [recaptchaError, setRecaptchaError] = useState<string>('');
+  const [enterpriseReady, setEnterpriseReady] = useState(false);
+  const [enterpriseBusy, setEnterpriseBusy] = useState(false);
+  const [enterpriseError, setEnterpriseError] = useState<string>('');
+  const recaptchaContainerRef = useRef<HTMLDivElement>(null);
+  const recaptchaWidgetId = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetId = useRef<string | null>(null);
   const hasCalledCallback = useRef<boolean>(false);
@@ -23,7 +40,7 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
   }, []);
 
   // Memoize callback untuk mencegah re-render
-  const handleSolved = useCallback((result: { type: 'turnstile' | 'fallbackEmoji'; value: string }) => {
+  const handleSolved = useCallback((result: { type: 'turnstile' | 'recaptchaV2' | 'recaptchaEnterprise' | 'fallbackEmoji'; value: string; action?: string }) => {
     // Allow callback untuk expired token (empty value) untuk reset
     if (result.type === 'turnstile' && !result.value) {
       // Token expired, reset flag untuk allow retry
@@ -43,7 +60,17 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
     }
   }, [onSolved]);
 
+  const recaptchaV2SiteKeyProp = String(recaptchaV2SiteKey || '').trim();
+  const useRecaptchaV2 = Boolean(recaptchaV2SiteKeyProp);
+
+  const enterpriseSiteKeyProp = String(enterpriseSiteKey || '').trim();
+  const enterpriseActionProp = String(enterpriseAction || '').trim() || 'LOGIN';
+  const useEnterprise = Boolean(enterpriseSiteKeyProp);
+
   useEffect(() => {
+    if (useRecaptchaV2 || useEnterprise) {
+      return;
+    }
     if (!siteKey || siteKey.trim() === '') {
       console.warn('[Turnstile] Site key is missing, using fallback');
       setUseFallback(true);
@@ -186,10 +213,170 @@ export function CaptchaBlock({ onSolved, siteKey, fallbackText = 'Klik emoji {em
   }, [siteKey, handleSolved]);
 
   useEffect(() => {
+    if (!useRecaptchaV2) return;
+
+    const ensureScript = () => {
+      const existing = document.querySelector('script[src^="https://www.google.com/recaptcha/api.js"]') as HTMLScriptElement | null;
+      if (existing) {
+        const onLoad = existing.onload;
+        existing.onload = (ev) => {
+          if (typeof onLoad === 'function') onLoad.call(existing, ev);
+          setRecaptchaReady(Boolean(window.grecaptcha));
+        };
+        setRecaptchaReady(Boolean(window.grecaptcha));
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://www.google.com/recaptcha/api.js?render=explicit';
+      script.async = true;
+      script.defer = true;
+      script.onload = () => setRecaptchaReady(Boolean(window.grecaptcha));
+      script.onerror = () => {
+        setRecaptchaReady(false);
+        setRecaptchaError('Gagal memuat reCAPTCHA.');
+        setUseFallback(true);
+      };
+      document.head.appendChild(script);
+    };
+
+    ensureScript();
+  }, [useRecaptchaV2]);
+
+  useEffect(() => {
+    if (!useRecaptchaV2) return;
+    if (!recaptchaReady || !window.grecaptcha) return;
+    if (recaptchaWidgetId.current !== null) return;
+    if (!recaptchaContainerRef.current) return;
+
+    try {
+      recaptchaWidgetId.current = window.grecaptcha.render(recaptchaContainerRef.current, {
+        sitekey: recaptchaV2SiteKeyProp,
+        callback: (token) => {
+          if (token && String(token).trim() !== '') {
+            handleSolved({ type: 'recaptchaV2', value: String(token) });
+          }
+        },
+        'expired-callback': () => {
+          hasCalledCallback.current = false;
+        },
+        'error-callback': () => {
+          hasCalledCallback.current = false;
+          setRecaptchaError('reCAPTCHA error. Coba refresh.');
+          setUseFallback(true);
+        },
+      });
+    } catch (_) {
+      setRecaptchaError('Gagal render reCAPTCHA.');
+      setUseFallback(true);
+    }
+
+    return () => {
+      if (window.grecaptcha && recaptchaWidgetId.current !== null) {
+        try {
+          window.grecaptcha.reset(recaptchaWidgetId.current);
+        } catch (_) {}
+        recaptchaWidgetId.current = null;
+      }
+    };
+  }, [useRecaptchaV2, recaptchaReady, recaptchaV2SiteKeyProp, handleSolved]);
+
+  useEffect(() => {
+    if (!useEnterprise) return;
+
+    if (window.grecaptcha?.enterprise) {
+      setEnterpriseReady(true);
+      return;
+    }
+
+    const existing = document.querySelector('script[src^="https://www.google.com/recaptcha/enterprise.js"]') as HTMLScriptElement | null;
+    if (existing) {
+      const onLoad = existing.onload;
+      existing.onload = (ev) => {
+        if (typeof onLoad === 'function') onLoad.call(existing, ev);
+        setEnterpriseReady(Boolean(window.grecaptcha?.enterprise));
+      };
+      setEnterpriseReady(Boolean(window.grecaptcha?.enterprise));
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = `https://www.google.com/recaptcha/enterprise.js?render=${encodeURIComponent(enterpriseSiteKeyProp)}`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => setEnterpriseReady(Boolean(window.grecaptcha?.enterprise));
+    script.onerror = () => {
+      setEnterpriseReady(false);
+      setEnterpriseError('Gagal memuat reCAPTCHA.');
+      setUseFallback(true);
+    };
+    document.head.appendChild(script);
+  }, [useEnterprise, enterpriseSiteKeyProp]);
+
+  useEffect(() => {
     if (useFallback && !hasCalledCallback.current) {
       handleSolved({ type: 'fallbackEmoji', value: '' });
     }
   }, [useFallback, handleSolved]);
+
+  if (useRecaptchaV2) {
+    return (
+      <div className="w-full space-y-2">
+        <div ref={recaptchaContainerRef} className="min-h-[78px]" />
+        {recaptchaError ? <div className="text-[11px] text-red-300">{recaptchaError}</div> : null}
+      </div>
+    );
+  }
+
+  const runEnterprise = async () => {
+    if (enterpriseBusy) return;
+    const site = enterpriseSiteKeyProp;
+    if (!site) {
+      setEnterpriseError('Site key tidak tersedia.');
+      setUseFallback(true);
+      return;
+    }
+    if (!window.grecaptcha?.enterprise) {
+      setEnterpriseError('reCAPTCHA belum siap. Coba refresh.');
+      setUseFallback(true);
+      return;
+    }
+
+    setEnterpriseBusy(true);
+    setEnterpriseError('');
+    const action = enterpriseActionProp;
+    try {
+      await new Promise<void>((resolve) => window.grecaptcha!.enterprise.ready(() => resolve()));
+      const token = await window.grecaptcha!.enterprise.execute(site, { action });
+      if (!token || String(token).trim() === '') {
+        setEnterpriseError('Token kosong.');
+        setUseFallback(true);
+        return;
+      }
+      handleSolved({ type: 'recaptchaEnterprise', value: token, action });
+    } catch (e) {
+      setEnterpriseError('Gagal menjalankan reCAPTCHA.');
+      setUseFallback(true);
+    } finally {
+      setEnterpriseBusy(false);
+    }
+  };
+
+  if (useEnterprise) {
+    return (
+      <div className="w-full space-y-2">
+        <button
+          type="button"
+          onClick={runEnterprise}
+          disabled={enterpriseBusy || !enterpriseReady}
+          className="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold transition border border-slate-700 disabled:opacity-60"
+        >
+          {enterpriseBusy ? 'Memverifikasi...' : enterpriseReady ? 'Saya bukan bot' : 'Memuat reCAPTCHA...'}
+        </button>
+        {enterpriseError ? <div className="text-[11px] text-red-300">{enterpriseError}</div> : null}
+      </div>
+    );
+  }
 
   if (useFallback) {
     const fallbackMessage = fallbackText.includes('{emoji}')
@@ -228,6 +415,14 @@ declare global {
             render: (container: HTMLElement, options: any) => string;
             remove: (widgetId: string) => void;
             reset: (widgetId: string) => void;
+        };
+        grecaptcha?: {
+          enterprise?: {
+            ready: (cb: () => void) => void;
+            execute: (siteKey: string, params: { action: string }) => Promise<string>;
+          };
+          render: (container: HTMLElement, parameters: Record<string, any>) => number;
+          reset: (opt_widget_id?: number) => void;
         }
     }
 }
